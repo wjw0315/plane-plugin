@@ -1,0 +1,8 @@
+{
+  "id": "plane-plugin",
+  "name": "Plane Task Board",
+  "description": "在 Paseo 中查看和管理 Plane 团队任务看板：动态列、拖拽改状态、会话与工作项双向同步。",
+  "requirements": {
+    "paseo": ">=0.14.0"
+  }
+}
