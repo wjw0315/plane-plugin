@@ -10,7 +10,12 @@
     "shared/"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mcp": "tsx mcp/server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.14.0",
@@ -18,7 +23,7 @@
     "@types/react": "~19.2.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "typescript": "^5.9.3",
-    "zod": "^4.4.3"
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
   }
 }
