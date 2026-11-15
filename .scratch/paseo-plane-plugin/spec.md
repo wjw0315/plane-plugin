@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 
 # Paseo Plane 插件 Spec
 

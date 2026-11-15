@@ -13,4 +13,4 @@
 
 ## Implementation
 
-已实现并验证：`paseo-plugin.json` 清单、`shared/plane-settings.ts`（`defineSettings` 五字段 schema）、`client/plane-contribute.tsx`（装配 `addScreen`/`addSidebarHeaderItem`/`addCommandCenterItem`/`addSettingsScreen` 四贡献点）、`client/plane-screen.tsx`（配置状态展示）、`client/plane-sidebar-entry.tsx`、`client/plane-settings-page.tsx`（读写表单）、`index.client.tsx`、`index.server.ts`（`registerSettings`）。`tsc --noEmit` 零错误，`paseo plugin install` 后 daemon 日志 "Plugin ready" 无报错。
+已实现并验证：`paseo-plugin.json` 清单、`shared/plane-settings.ts`（`defineSettings` 四字段 schema：baseUrl/apiKey/workspace/apiVersion，project 不在设置中，在看板中切换）、`client/plane-contribute.tsx`（装配 `addScreen`/`addSidebarHeaderItem`/`addCommandCenterItem`/`addSettingsScreen` 四贡献点）、`client/plane-screen.tsx`（配置状态展示）、`client/plane-sidebar-entry.tsx`、`client/plane-settings-page.tsx`（读写表单）、`index.client.tsx`、`index.server.ts`（`registerSettings`）。`tsc --noEmit` 零错误，`paseo plugin install` 后 daemon 日志 "Plugin ready" 无报错。

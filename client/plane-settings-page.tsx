@@ -10,8 +10,10 @@ const DEFAULT_CONFIG: PlaneConfig = {
   baseUrl: "",
   apiKey: "",
   workspace: "",
-  project: "",
   apiVersion: "v2",
+  webhookEnabled: false,
+  webhookSecret: "",
+  webhookPort: 8788,
 };
 
 type TextField = keyof Omit<PlaneConfig, "apiVersion">;
@@ -92,6 +94,15 @@ export function PlaneSettingsPage(props: PluginSurfaceProps) {
     setForm((prev) => ({ ...prev, apiVersion: v }));
   };
 
+  const setWebhookEnabled = (v: boolean) => {
+    setForm((prev) => ({ ...prev, webhookEnabled: v }));
+  };
+
+  const setWebhookPort = (v: string) => {
+    const port = Number(v);
+    setForm((prev) => ({ ...prev, webhookPort: Number.isFinite(port) ? Math.trunc(port) : prev.webhookPort }));
+  };
+
   const inputStyle: object = {
     backgroundColor: c.surface1,
     borderColor: c.border,
@@ -151,17 +162,6 @@ export function PlaneSettingsPage(props: PluginSurfaceProps) {
         autoCorrect={false}
       />
 
-      <Text style={labelStyle}>Project</Text>
-      <TextInput
-        style={inputStyle}
-        value={form.project}
-        onChangeText={(v) => updateField("project", v)}
-        placeholder="project id / slug"
-        placeholderTextColor={c.foregroundMuted}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-
       <Text style={labelStyle}>API 版本</Text>
       <View style={[styles.segmented, { backgroundColor: c.surface1, borderColor: c.border }]}>
         <Pressable
@@ -187,6 +187,63 @@ export function PlaneSettingsPage(props: PluginSurfaceProps) {
           </Text>
         </Pressable>
       </View>
+
+      <Text style={[styles.title, { color: c.foreground, fontSize: 16, marginTop: 16, marginBottom: 12 }]}>
+        Webhook（可选）
+      </Text>
+
+      <View style={[styles.segmented, { backgroundColor: c.surface1, borderColor: c.border }]}>
+        <Pressable
+          onPress={() => setWebhookEnabled(false)}
+          style={[
+            styles.segment,
+            { backgroundColor: !form.webhookEnabled ? c.accent : "transparent", borderColor: c.border },
+          ]}
+        >
+          <Text style={[styles.segmentText, { color: !form.webhookEnabled ? c.accentForeground : c.foregroundMuted }]}>
+            关闭
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setWebhookEnabled(true)}
+          style={[
+            styles.segment,
+            { backgroundColor: form.webhookEnabled ? c.accent : "transparent", borderColor: c.border },
+          ]}
+        >
+          <Text style={[styles.segmentText, { color: form.webhookEnabled ? c.accentForeground : c.foregroundMuted }]}>
+            启用
+          </Text>
+        </Pressable>
+      </View>
+
+      {form.webhookEnabled ? (
+        <>
+          <Text style={labelStyle}>Webhook Secret</Text>
+          <TextInput
+            style={inputStyle}
+            value={form.webhookSecret}
+            onChangeText={(v) => updateField("webhookSecret", v)}
+            placeholder="plane_wh_..."
+            placeholderTextColor={c.foregroundMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+          />
+
+          <Text style={labelStyle}>Webhook 端口</Text>
+          <TextInput
+            style={inputStyle}
+            value={String(form.webhookPort)}
+            onChangeText={setWebhookPort}
+            placeholder="8788"
+            placeholderTextColor={c.foregroundMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="numeric"
+          />
+        </>
+      ) : null}
 
       <Pressable
         onPress={handleSave}
