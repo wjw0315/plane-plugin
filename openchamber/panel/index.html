@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plane</title>
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#121519; --card:#171b20; --line:#252b33; --line2:#2f3742;
+    --fg:#e6e9ee; --fg2:#9aa4b2; --fg3:#6b7482; --ok:#4ade80; --warn:#fbbf24;
+  }
+  body[data-theme="light"]{
+    --bg:#fff; --panel:#f7f8fa; --card:#fff; --line:#e5e7eb; --line2:#d1d5db;
+    --fg:#111827; --fg2:#4b5563; --fg3:#9ca3af;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:13px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif;
+    display:flex; flex-direction:column; min-width:280px;
+  }
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  h1{font-size:12px;margin:0;font-weight:600;letter-spacing:.02em}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--fg3);flex:0 0 6px}
+  .dot.on{background:var(--ok)}
+  .grow{flex:1}
+  main{flex:1;min-height:0;overflow:auto;padding:16px 12px}
+  .empty{border:1px dashed var(--line2);border-radius:12px;padding:18px 14px;text-align:center;color:var(--fg2)}
+  .empty .t{font-size:12.5px;color:var(--fg);margin-bottom:6px}
+  .empty .steps{font-size:11.5px;line-height:1.75;text-align:left;margin:10px auto 0;max-width:260px;color:var(--fg3)}
+  .empty code{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:0 4px;font-size:10.5px}
+  footer{display:flex;align-items:center;gap:6px;padding:7px 12px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--fg3);background:var(--panel)}
+  footer .k{color:var(--fg3)}
+  footer .v{color:var(--fg2)}
+  footer button{margin-left:auto;background:var(--card);border:1px solid var(--line2);color:var(--fg2);
+    border-radius:6px;font-size:10.5px;padding:2px 7px;cursor:pointer}
+  footer button:hover{color:var(--fg)}
+</style>
+</head>
+<body data-theme="dark">
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Plane</h1>
+    <span class="grow"></span>
+  </header>
+  <main>
+    <div class="empty">
+      <div class="t">还没接上 Plane</div>
+      <div>这一片只搭骨架，看板在下一片接。</div>
+      <div class="steps">
+        1. 设置 → 扩展 → Plane → 允许本地 service<br>
+        2. Integrations 卡片里填 <code>地址</code> / <code>API Key</code> / <code>workspace</code><br>
+        3. 回到这个面板
+      </div>
+    </div>
+  </main>
+  <footer>
+    <span class="k">宿主</span><span class="v" id="hostState">—</span>
+    <span class="k">· service</span><span class="v" id="serviceState">—</span>
+    <button id="retry" type="button">重试</button>
+  </footer>
+  <script src="./main.js"></script>
+</body>
+</html>

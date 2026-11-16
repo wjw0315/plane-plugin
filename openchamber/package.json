@@ -1,0 +1,38 @@
+{
+  "name": "openchamber-plane",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plane 任务看板 —— OpenChamber guest 扩展",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:panel && npm run build:service",
+    "build:panel": "esbuild panel/src/main.js --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
+    "build:service": "esbuild service/src/main.js --bundle --format=cjs --platform=node --target=node20 --outfile=service/main.cjs",
+    "test": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@openchamber/sdk": "2.7.2",
+    "esbuild": "^0.28.2"
+  },
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.7.0"
+    },
+    "id": "openchamber-plane",
+    "name": "Plane",
+    "icon": "layout-columns",
+    "contributes": {
+      "panel": {
+        "id": "openchamber-plane",
+        "name": "Plane",
+        "icon": "layout-columns",
+        "entry": "panel/index.html"
+      },
+      "service": {
+        "entry": "service/main.cjs",
+        "runtime": "host"
+      }
+    }
+  }
+}
