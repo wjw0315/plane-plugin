@@ -17,7 +17,8 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 - **03 列式看板**（完成）：按项目 states 生成列、卡片渲染、拖拽改状态（乐观更新 + 5 秒撤销 + 失败回滚）
 - **04 双视图**（完成）：面板头部「列 / 列表」切换，选择记在宿主 storage（`plane.view`）；列表视图纵向分组 + 「移动到」下拉，切换不重拉数据
 - **05 任务详情**（完成）：点卡片开详情（列视图=覆盖页、列表视图=就地展开），字段含状态/编号/优先级/指派/标签/会话/描述；详情里可切状态、在 Plane 打开、复制链接；Esc / 返回 / 收起关闭
-- 06 起：发起会话（参数抽屉 + 两条发起路径）
+- **06 发起会话**（完成）：详情里「发起会话」开参数抽屉（项目 / 全新 worktree / 模型 / 思考级别 / 智能体 / 补充提示词 + prompt 预览）；默认走宿主 `startSession`，选了三件套或 worktree 走 service `sessions.start`（可先 `git worktree add`）；成功后打 `oc-<sessionId>` 标签并推 In Progress
+- 07 起：手动回填结论（草稿 → 评论 → ✓ 标记）
 
 ## 安装
 
@@ -66,8 +67,15 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `POST /work-items` | 列工作项（可按 `stateId` 过滤；v1 无 identifier 时用 `sequence_id`） |
 | `POST /work-item` | 取单条工作项 + 描述文本（详情用；HTML 转纯文本） |
 | `POST /patch-state` | 改工作项状态（拖拽落列 / 详情里切） |
+| `POST /session-start` | 由 service 发起会话（可指定 model/variant/agent；需要时先建 worktree） |
+| `POST /bind-session` | 给工作项追加 `oc-<sessionId>` 标签（可顺带推状态） |
 
 错误码：`CONFIG_MISSING`(400) / `BAD_CONFIG`(400) / `AUTH_FAILED`(401) / `NOT_FOUND`(404) / `RATE_LIMITED`(429) / `NETWORK`(502)。`NETWORK` 与 `RATE_LIMITED` 在 service 内重试一次。
+
+## 会话相关的两条路径
+
+- **默认**（不改模型/思考级别/智能体、不开 worktree）：面板调宿主 `startSession`，一次调用顺带把工作项挂成会话里的 chip。
+- **要指定模型三件套或新 worktree**：面板打 service 的 `/session-start`，service 用宿主 `sessions.start`（它能指定 model/variant/agent），需要 worktree 时先 `git worktree add <repo>/.worktrees/<name>` 再把这个目录传过去——宿主的 `sessions.start` 没有 worktree 参数。
 
 ## 契约要点
 

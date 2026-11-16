@@ -29,6 +29,7 @@
       <button id="moveSel">5. 下拉改到 Todo</button>
       <button id="openCard">6. 打开第一张卡详情</button>
       <button id="esc">7. Esc 关闭详情</button>
+      <button id="startSess">8. 发起会话（默认路径）</button>
     </div>
     <iframe id="panel" src="../panel/index.html" style="height:calc(100% - 34px)"></iframe>
   </div>
@@ -108,6 +109,18 @@ function routeService(p) {
     fake.configured = true;
     return { status: 200, body: JSON.stringify({ ok: true, config: { configured: true, baseUrl: "http://192.168.1.188:8080", workspace: "g2", apiVersion: "v1", hasKey: true } }) };
   }
+  if (path === "/session-start") {
+    const body = JSON.parse(p.body || "{}");
+    fake.lastStart = body;
+    return { status: 200, body: JSON.stringify({ ok: true, sessionId: "ses_svc_1", directory: body.directory || "/tmp/wt", worktree: body.worktree ? { directory: "/tmp/wt", branch: "oc/x" } : null }) };
+  }
+  if (path === "/bind-session") {
+    const body = JSON.parse(p.body || "{}");
+    fake.lastBind = body;
+    const item = fake.items.find((i) => i.id === body.workItemId) || {};
+    item.sess = body.sessionId;
+    return { status: 200, body: JSON.stringify({ ok: true, item, label: { id: "lb1", name: "oc-" + body.sessionId } }) };
+  }
   if (path === "/work-item") {
     const body = JSON.parse(p.body || "{}");
     const item = fake.items.find((i) => i.id === body.workItemId);
@@ -149,6 +162,14 @@ window.addEventListener("message", (e) => {
       return;
     case "service-request":
       return reply(m.id, routeService(m.payload || {}));
+    case "workspace-read":
+      return reply(m.id, { kind: "projects", state: "ready", projects: [
+        { id: "ocproj", name: "xlm-scrm", directory: "/tmp/xlm-scrm" },
+      ] });
+    case "start-session":
+      log("  start-session payload keys: " + Object.keys(m.payload || {}).join(","));
+      fake.lastHostStart = m.payload;
+      return reply(m.id, { sessionId: "ses_host_1", sent: "sent", linked: true });
     case "service-status":
       return reply(m.id, { status: "ready" });
     case "storage": {
@@ -231,6 +252,22 @@ document.getElementById("openCard").addEventListener("click", () => {
 document.getElementById("esc").addEventListener("click", () => {
   frame.contentDocument?.dispatchEvent(new frame.contentDocument.defaultView.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   log("已发送 Esc", "ok");
+});
+
+document.getElementById("startSess").addEventListener("click", async () => {
+  const d = frame.contentDocument;
+  const card = d?.querySelector(".card");
+  if (!card) return log("找不到卡片", "err");
+  card.click();
+  await new Promise((r) => setTimeout(r, 250));
+  const btn = d.querySelector("[data-start-session]");
+  if (!btn) return log("详情里没有「发起会话」", "err");
+  btn.click();
+  await new Promise((r) => setTimeout(r, 450));
+  const go = d.querySelector("[data-drawer-go]");
+  if (!go) return log("抽屉没打开", "err");
+  go.click();
+  log("已提交发起会话（默认路径）", "ok");
 });
 
 document.getElementById("go").addEventListener("click", () => {

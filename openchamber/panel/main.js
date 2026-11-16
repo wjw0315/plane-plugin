@@ -1700,6 +1700,8 @@
     // board | list
     detail: null,
     // { id, item, description, loading, error }
+    drawer: null,
+    // 发起会话参数抽屉
     toast: null,
     error: null,
     saveState: "",
@@ -2033,10 +2035,8 @@
     }
     if (phase === "board") {
       const detailId = state.detail?.id ?? null;
-      if (state.view === "list") {
-        return listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "");
-      }
-      return boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
+      const base = state.view === "list" ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "") : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
+      return base + (state.drawer ? drawerHTML() : "");
     }
     return "";
   }
@@ -2055,7 +2055,7 @@
     <div class="frow"><span class="k">\u4F18\u5148\u7EA7</span><span>${ESC2(PRIO_LABEL[item.priority] || "\u2014")}</span></div>
     <div class="frow"><span class="k">\u6307\u6D3E</span><span>${ESC2(item.assignees?.map((a) => a.name).filter(Boolean).join("\u3001") || "\u672A\u6307\u6D3E")}</span></div>
     <div class="frow"><span class="k">\u6807\u7B7E</span><span>${item.labels?.length ? item.labels.length + " \u4E2A" : "\u65E0"}</span></div>
-    <div class="frow"><span class="k">\u4F1A\u8BDD</span><span class="fine">\u672A\u7ED1\u5B9A\uFF0806 \u7247\u63A5\u5165\uFF09</span></div>
+    <div class="frow"><span class="k">\u4F1A\u8BDD</span>${item.sess ? `<span class="chip sess">\u2318 ${ESC2(item.sess)}</span>` : `<button class="btn" data-start-session="${ESC2(item.id)}">\u53D1\u8D77\u4F1A\u8BDD</button>`}</div>
     <div class="sec"><h4>\u63CF\u8FF0</h4>${desc}</div>
     <div class="acts">
       <button class="btn pri" data-plane="${ESC2(item.id)}">\u5728 Plane \u6253\u5F00 \u2197</button>
@@ -2070,6 +2070,152 @@
   }
   function inlineDetailHTML() {
     return `<div class="inlineD">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">\u6536\u8D77</button></div></div>`;
+  }
+  var MODEL_PRESETS = ["magpie/glm-5.3", "anthropic/claude-sonnet-5", "openai/gpt-5.2", "deepseek/deepseek-v4-flash"];
+  var AGENT_PRESETS = ["build", "plan"];
+  var VARIANT_PRESETS = ["default", "low", "medium", "high"];
+  async function openDrawer(itemId) {
+    const item = state.board.items.find((i) => i.id === itemId);
+    if (!item) return;
+    state.drawer = {
+      itemId,
+      busy: false,
+      error: null,
+      projects: [],
+      projectId: null,
+      worktree: false,
+      wtName: `oc-${item.identifier || item.id}`,
+      baseBranch: "main",
+      model: "",
+      variant: "default",
+      agent: "build",
+      extra: ""
+    };
+    render();
+    try {
+      const snap = await host.listProjects();
+      const projects = snap?.projects || [];
+      const d = state.drawer;
+      if (!d) return;
+      d.projects = projects;
+      d.projectId = projects[0]?.id ?? null;
+      render();
+    } catch (e) {
+      if (!state.drawer) return;
+      state.drawer.error = { code: e.code || "PROJECTS_FAILED", message: e.message || "\u8BFB\u4E0D\u5230 OpenChamber \u9879\u76EE" };
+      render();
+    }
+  }
+  function closeDrawer() {
+    state.drawer = null;
+    render();
+  }
+  function promptForDrawer(item) {
+    const d = state.drawer;
+    const head = `XLMSC-${item.identifier || item.id} ${item.name}`;
+    const parts = [head, state.detail?.description || "", d?.extra?.trim() || ""].filter(Boolean);
+    return parts.join("\n\n") + "\n\n\u5B8C\u6210\u540E\u603B\u7ED3\uFF1A\u6539\u4E86\u4EC0\u4E48\u3001\u600E\u4E48\u9A8C\u8BC1\u3001\u9057\u7559\u4EC0\u4E48\u3002";
+  }
+  async function submitDrawer() {
+    const d = state.drawer;
+    const item = state.board.items.find((i) => i.id === d.itemId);
+    if (!d || !item || d.busy) return;
+    const project = d.projects.find((p) => p.id === d.projectId);
+    if (!project) {
+      d.error = { code: "NO_PROJECT", message: "\u5148\u9009\u4E00\u4E2A OpenChamber \u9879\u76EE" };
+      return render();
+    }
+    d.busy = true;
+    d.error = null;
+    render();
+    const prompt = promptForDrawer(item);
+    const needsService = Boolean(d.model) || d.variant !== "default" || d.agent !== "build" || d.worktree;
+    try {
+      let sessionId = null;
+      if (needsService) {
+        const out = await callService("/session-start", {
+          body: {
+            prompt,
+            title: `XLMSC-${item.identifier || item.id} ${item.name}`,
+            projectId: project.id,
+            directory: project.directory,
+            model: d.model || null,
+            variant: d.variant,
+            agent: d.agent,
+            worktree: d.worktree ? { name: d.wtName, baseBranch: d.baseBranch } : null
+          }
+        });
+        sessionId = out.sessionId;
+      } else {
+        const res = await host.startSession({
+          providerId: "plane",
+          id: item.id,
+          title: `XLMSC-${item.identifier || item.id} ${item.name}`,
+          url: itemUrl(item),
+          text: prompt,
+          projectId: project.id
+        });
+        sessionId = res?.sessionId || null;
+      }
+      if (!sessionId) throw Object.assign(new Error("\u5BBF\u4E3B\u6CA1\u6709\u8FD4\u56DE\u4F1A\u8BDD id"), { code: "NO_SESSION" });
+      const inProgress = state.board.states.find((s) => /in progress|doing|进行中/i.test(s.name));
+      try {
+        await callService("/bind-session", {
+          body: { projectId: state.selected, workItemId: item.id, sessionId, stateId: inProgress?.id }
+        });
+      } catch (e) {
+        showToast(`\u4F1A\u8BDD\u5DF2\u5EFA\uFF0C\u4F46\u7ED1\u5B9A\u5931\u8D25\uFF1A${e.code || ""}`, null, null, true);
+      }
+      item.sess = sessionId;
+      if (inProgress) item.stateId = inProgress.id;
+      state.drawer = null;
+      render();
+      showToast(`\u4F1A\u8BDD\u5DF2\u521B\u5EFA\uFF1A${sessionId}`);
+      loadBoard();
+    } catch (e) {
+      d.busy = false;
+      d.error = { code: e.code || "START_FAILED", message: e.message || String(e) };
+      render();
+    }
+  }
+  function drawerHTML() {
+    const d = state.drawer;
+    const item = state.board.items.find((i) => i.id === d.itemId);
+    if (!item) return "";
+    const opts = (list, cur) => list.map((v) => `<option value="${ESC2(v)}"${v === cur ? " selected" : ""}>${ESC2(v)}</option>`).join("");
+    return `<div class="overlay"><div class="dhead">
+      <button class="back" data-drawer-close="1" title="\u8FD4\u56DE">\u2039</button>
+      <span class="ident">\u53D1\u8D77\u4F1A\u8BDD \xB7 XLMSC-${ESC2(item.identifier || item.id)}</span>
+      <span class="grow"></span><span class="fine">Esc \u8FD4\u56DE</span></div>
+    <div class="dbody">
+      ${d.error ? `<div class="err">${ESC2(d.error.code)}\uFF1A${ESC2(d.error.message)}</div>` : ""}
+      <label class="fld">\u9879\u76EE
+        <select id="dwProject">${(d.projects || []).map((p) => `<option value="${ESC2(p.id)}"${p.id === d.projectId ? " selected" : ""}>${ESC2(p.name)}</option>`).join("")}</select>
+      </label>
+      <label class="fld">\u5DE5\u4F5C\u533A
+        <span class="wt"><input type="checkbox" id="dwWt"${d.worktree ? " checked" : ""}><span>\u5168\u65B0 worktree</span>
+        <input type="text" id="dwWtName" value="${ESC2(d.wtName)}" placeholder="worktree \u540D">
+        <input type="text" id="dwBase" value="${ESC2(d.baseBranch)}" placeholder="\u57FA\u7EBF\u5206\u652F"></span>
+      </label>
+      <label class="fld">\u6A21\u578B
+        <select id="dwModel"><option value="">\u8DDF\u968F\u5F53\u524D\u9ED8\u8BA4</option>${opts(MODEL_PRESETS, d.model)}</select>
+      </label>
+      <label class="fld">\u601D\u8003\u7EA7\u522B
+        <select id="dwVariant">${opts(VARIANT_PRESETS, d.variant)}</select>
+      </label>
+      <label class="fld">\u667A\u80FD\u4F53
+        <select id="dwAgent">${opts(AGENT_PRESETS, d.agent)}</select>
+      </label>
+      <div class="fine" style="margin-top:8px">\u8865\u5145\u63D0\u793A\u8BCD</div>
+      <textarea id="dwExtra" placeholder="\u7EA6\u675F\u3001\u9A8C\u6536\u6807\u51C6\u3001\u4E0D\u8981\u78B0\u7684\u6587\u4EF6\u2026">${ESC2(d.extra)}</textarea>
+      <div class="fine" style="margin-top:8px">\u5C06\u53D1\u9001</div>
+      <pre class="pv" id="dwPreview">${ESC2(promptForDrawer(item))}</pre>
+      <div class="acts">
+        <button class="btn pri" data-drawer-go="1"${d.busy ? " disabled" : ""}>${d.busy ? "\u53D1\u8D77\u4E2D\u2026" : "\u5F00\u59CB\u4F1A\u8BDD"}</button>
+        <button class="btn" data-drawer-close="1">\u53D6\u6D88</button>
+      </div>
+      <div class="fine">\u9009\u4E86\u4E09\u4EF6\u5957\u6216 worktree \u8D70 service\uFF08\u80FD\u6307\u5B9A\u6A21\u578B\uFF09\uFF1B\u90FD\u4E0D\u6539\u5219\u8D70\u5BBF\u4E3B startSession\uFF08\u66F4\u8F7B\uFF09\u3002</div>
+    </div></div>`;
   }
   function wire() {
     const form = $("setupForm");
@@ -2104,6 +2250,39 @@
     document.querySelectorAll("[data-close]").forEach((el) => {
       el.addEventListener("click", () => closeDetail());
     });
+    document.querySelectorAll("[data-start-session]").forEach((el) => {
+      el.addEventListener("click", () => openDrawer(el.dataset.startSession));
+    });
+    document.querySelectorAll("[data-drawer-close]").forEach((el) => {
+      el.addEventListener("click", () => closeDrawer());
+    });
+    const go = document.querySelector("[data-drawer-go]");
+    if (go) {
+      go.addEventListener("click", () => {
+        const d = state.drawer;
+        if (!d) return;
+        d.projectId = $("dwProject")?.value ?? d.projectId;
+        d.worktree = Boolean($("dwWt")?.checked);
+        d.wtName = $("dwWtName")?.value ?? d.wtName;
+        d.baseBranch = $("dwBase")?.value ?? d.baseBranch;
+        d.model = $("dwModel")?.value ?? "";
+        d.variant = $("dwVariant")?.value ?? "default";
+        d.agent = $("dwAgent")?.value ?? "build";
+        d.extra = $("dwExtra")?.value ?? "";
+        submitDrawer();
+      });
+    }
+    const extra = $("dwExtra");
+    if (extra) {
+      extra.addEventListener("input", () => {
+        const d = state.drawer;
+        if (!d) return;
+        d.extra = extra.value;
+        const item = state.board.items.find((i) => i.id === d.itemId);
+        const pv = $("dwPreview");
+        if (item && pv) pv.textContent = promptForDrawer(item);
+      });
+    }
     document.querySelectorAll("[data-setstate]").forEach((el) => {
       el.addEventListener("click", () => moveItem(el.dataset.setstate, el.dataset.to));
     });
@@ -2145,6 +2324,11 @@
     }
   }
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.drawer) {
+      e.preventDefault();
+      closeDrawer();
+      return;
+    }
     if (e.key === "Escape" && state.detail) {
       e.preventDefault();
       closeDetail();

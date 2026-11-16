@@ -194,3 +194,33 @@ export async function getWorkItem(cfg, projectId, workItemId, fetchImpl = fetch)
   );
   return { item: mapItem(raw), description: htmlToText(raw?.description_html ?? raw?.description ?? "") };
 }
+
+/* ---------------- 06 片：标签与通用写入 ---------------- */
+
+export async function listLabels(cfg, projectId, fetchImpl = fetch) {
+  const data = await request(cfg, `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/labels/`, { fetchImpl });
+  return unwrap(data).map((r) => ({ id: String(r.uuid ?? r.id ?? ""), name: String(r.name ?? "") }));
+}
+
+/** 按名字找标签，没有就建（v1 的标签是项目级）。 */
+export async function ensureLabel(cfg, projectId, name, fetchImpl = fetch) {
+  const found = (await listLabels(cfg, projectId, fetchImpl)).find(
+    (l) => l.name.toLowerCase() === String(name).toLowerCase(),
+  );
+  if (found) return found;
+  const data = await request(cfg, `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/labels/`, {
+    method: "POST",
+    body: { name, color: "#a78bfa" },
+    fetchImpl,
+  });
+  return { id: String(data?.uuid ?? data?.id ?? ""), name: String(data?.name ?? name) };
+}
+
+export async function patchWorkItem(cfg, projectId, workItemId, patch, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/`,
+    { method: "PATCH", body: patch, fetchImpl },
+  );
+  return mapItem(data);
+}

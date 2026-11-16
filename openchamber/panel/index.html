@@ -96,6 +96,16 @@
     font-size:11px;padding:3px 8px;cursor:pointer}
   .acts .btn.pri{background:#1d2733;border-color:#3b5163;color:#dbe6f0}
   .inlineD{border-top:1px dashed var(--line2);margin-top:8px;padding-top:8px}
+  .fld{display:flex;flex-direction:column;gap:4px;font-size:10.5px;color:var(--fg3);margin-bottom:8px}
+  .fld select,.fld input[type=text]{background:var(--card);border:1px solid var(--line2);border-radius:7px;
+    color:var(--fg);font-size:11.5px;padding:4px 6px;width:100%}
+  .fld .wt{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .fld .wt input[type=text]{flex:1;min-width:70px;width:auto}
+  textarea{width:100%;height:56px;background:var(--card);border:1px solid var(--line2);border-radius:8px;
+    color:var(--fg);font:11.5px/1.6 inherit;padding:6px 8px;resize:vertical}
+  .pv{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 8px;margin:0;
+    font:10.5px/1.6 ui-monospace,Menlo,monospace;color:var(--fg2);white-space:pre-wrap;max-height:110px;overflow:auto}
+  .acts .btn:disabled{opacity:.6;cursor:default}
   .card.sel{border-color:#3b5163;background:#141c25}
   .card:focus-visible{outline:2px solid #3b5163;outline-offset:1px}
   /* 看板 */

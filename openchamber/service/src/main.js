@@ -15,10 +15,13 @@
  *   POST /work-items 列工作项（可按 stateId 过滤）
  *   POST /work-item   取单条工作项 + 描述（详情用）
  *   POST /patch-state 改工作项状态
+ *   POST /session-start 由 service 发起会话（可指定 model/variant/agent、可先建 worktree）
+ *   POST /bind-session 给工作项追加 oc-<sessionId> 标签（可顺带推状态）
  */
 import http from "node:http";
 import { loadConfig, saveConfig, maskConfig } from "./config.js";
-import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, PlaneError } from "./plane.js";
+import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, PlaneError } from "./plane.js";
+import { startSession } from "./session.js";
 
 const PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
 const TOKEN = process.env.OPENCHAMBER_SERVICE_TOKEN || "";
@@ -152,6 +155,29 @@ const server = http.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const item = await patchState(cfg, body.projectId, body.workItemId, body.stateId);
       sendJson(res, 200, { ok: true, item });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/session-start") {
+      const body = await readBody(req);
+      const out = await startSession(process.env, body);
+      sendJson(res, 200, { ok: true, ...out });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/bind-session") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId || !body.sessionId) {
+        throw new PlaneError("BAD_CONFIG", "bind-session 需要 projectId / workItemId / sessionId");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const label = await ensureLabel(cfg, body.projectId, `oc-${body.sessionId}`);
+      const current = await getWorkItem(cfg, body.projectId, body.workItemId);
+      const labels = Array.from(new Set([...(current.item.labels || []), label.id]));
+      const patch = { labels };
+      if (body.stateId) patch.state = body.stateId;
+      const item = await patchWorkItem(cfg, body.projectId, body.workItemId, patch);
+      sendJson(res, 200, { ok: true, item, label });
       return;
     }
 

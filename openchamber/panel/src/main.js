@@ -22,6 +22,7 @@ const state = {
   board: { states: [], items: [] },
   view: "board", // board | list
   detail: null, // { id, item, description, loading, error }
+  drawer: null, // 发起会话参数抽屉
   toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
@@ -400,10 +401,11 @@ function viewFor(phase) {
 
   if (phase === "board") {
     const detailId = state.detail?.id ?? null;
-    if (state.view === "list") {
-      return listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "");
-    }
-    return boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
+    const base =
+      state.view === "list"
+        ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "")
+        : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
+    return base + (state.drawer ? drawerHTML() : "");
   }
 
   return "";
@@ -436,7 +438,11 @@ function detailBody(item) {
     <div class="frow"><span class="k">优先级</span><span>${ESC(PRIO_LABEL[item.priority] || "—")}</span></div>
     <div class="frow"><span class="k">指派</span><span>${ESC(item.assignees?.map((a) => a.name).filter(Boolean).join("、") || "未指派")}</span></div>
     <div class="frow"><span class="k">标签</span><span>${item.labels?.length ? item.labels.length + " 个" : "无"}</span></div>
-    <div class="frow"><span class="k">会话</span><span class="fine">未绑定（06 片接入）</span></div>
+    <div class="frow"><span class="k">会话</span>${
+      item.sess
+        ? `<span class="chip sess">⌘ ${ESC(item.sess)}</span>`
+        : `<button class="btn" data-start-session="${ESC(item.id)}">发起会话</button>`
+    }</div>
     <div class="sec"><h4>描述</h4>${desc}</div>
     <div class="acts">
       <button class="btn pri" data-plane="${ESC(item.id)}">在 Plane 打开 ↗</button>
@@ -453,6 +459,170 @@ function overlayDetailHTML() {
 
 function inlineDetailHTML() {
   return `<div class="inlineD">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">收起</button></div></div>`;
+}
+
+/* ---------------- 发起会话 ---------------- */
+
+const MODEL_PRESETS = ["magpie/glm-5.3", "anthropic/claude-sonnet-5", "openai/gpt-5.2", "deepseek/deepseek-v4-flash"];
+const AGENT_PRESETS = ["build", "plan"];
+const VARIANT_PRESETS = ["default", "low", "medium", "high"];
+
+async function openDrawer(itemId) {
+  const item = state.board.items.find((i) => i.id === itemId);
+  if (!item) return;
+  state.drawer = {
+    itemId,
+    busy: false,
+    error: null,
+    projects: [],
+    projectId: null,
+    worktree: false,
+    wtName: `oc-${item.identifier || item.id}`,
+    baseBranch: "main",
+    model: "",
+    variant: "default",
+    agent: "build",
+    extra: "",
+  };
+  render();
+  try {
+    const snap = await host.listProjects();
+    const projects = snap?.projects || [];
+    const d = state.drawer;
+    if (!d) return;
+    d.projects = projects;
+    d.projectId = projects[0]?.id ?? null;
+    render();
+  } catch (e) {
+    if (!state.drawer) return;
+    state.drawer.error = { code: e.code || "PROJECTS_FAILED", message: e.message || "读不到 OpenChamber 项目" };
+    render();
+  }
+}
+
+function closeDrawer() {
+  state.drawer = null;
+  render();
+}
+
+function promptForDrawer(item) {
+  const d = state.drawer;
+  const head = `XLMSC-${item.identifier || item.id} ${item.name}`;
+  const parts = [head, state.detail?.description || "", d?.extra?.trim() || ""].filter(Boolean);
+  return parts.join("\n\n") + "\n\n完成后总结：改了什么、怎么验证、遗留什么。";
+}
+
+async function submitDrawer() {
+  const d = state.drawer;
+  const item = state.board.items.find((i) => i.id === d.itemId);
+  if (!d || !item || d.busy) return;
+  const project = d.projects.find((p) => p.id === d.projectId);
+  if (!project) {
+    d.error = { code: "NO_PROJECT", message: "先选一个 OpenChamber 项目" };
+    return render();
+  }
+
+  d.busy = true;
+  d.error = null;
+  render();
+
+  const prompt = promptForDrawer(item);
+  const needsService = Boolean(d.model) || d.variant !== "default" || d.agent !== "build" || d.worktree;
+
+  try {
+    let sessionId = null;
+    if (needsService) {
+      const out = await callService("/session-start", {
+        body: {
+          prompt,
+          title: `XLMSC-${item.identifier || item.id} ${item.name}`,
+          projectId: project.id,
+          directory: project.directory,
+          model: d.model || null,
+          variant: d.variant,
+          agent: d.agent,
+          worktree: d.worktree ? { name: d.wtName, baseBranch: d.baseBranch } : null,
+        },
+      });
+      sessionId = out.sessionId;
+    } else {
+      const res = await host.startSession({
+        providerId: "plane",
+        id: item.id,
+        title: `XLMSC-${item.identifier || item.id} ${item.name}`,
+        url: itemUrl(item),
+        text: prompt,
+        projectId: project.id,
+      });
+      sessionId = res?.sessionId || null;
+    }
+
+    if (!sessionId) throw Object.assign(new Error("宿主没有返回会话 id"), { code: "NO_SESSION" });
+
+    const inProgress = state.board.states.find((s) => /in progress|doing|进行中/i.test(s.name));
+    try {
+      await callService("/bind-session", {
+        body: { projectId: state.selected, workItemId: item.id, sessionId, stateId: inProgress?.id },
+      });
+    } catch (e) {
+      showToast(`会话已建，但绑定失败：${e.code || ""}`, null, null, true);
+    }
+
+    item.sess = sessionId;
+    if (inProgress) item.stateId = inProgress.id;
+    state.drawer = null;
+    render();
+    showToast(`会话已创建：${sessionId}`);
+    loadBoard();
+  } catch (e) {
+    d.busy = false;
+    d.error = { code: e.code || "START_FAILED", message: e.message || String(e) };
+    render();
+  }
+}
+
+function drawerHTML() {
+  const d = state.drawer;
+  const item = state.board.items.find((i) => i.id === d.itemId);
+  if (!item) return "";
+  const opts = (list, cur) =>
+    list.map((v) => `<option value="${ESC(v)}"${v === cur ? " selected" : ""}>${ESC(v)}</option>`).join("");
+
+  return `<div class="overlay"><div class="dhead">
+      <button class="back" data-drawer-close="1" title="返回">‹</button>
+      <span class="ident">发起会话 · XLMSC-${ESC(item.identifier || item.id)}</span>
+      <span class="grow"></span><span class="fine">Esc 返回</span></div>
+    <div class="dbody">
+      ${d.error ? `<div class="err">${ESC(d.error.code)}：${ESC(d.error.message)}</div>` : ""}
+      <label class="fld">项目
+        <select id="dwProject">${(d.projects || [])
+          .map((p) => `<option value="${ESC(p.id)}"${p.id === d.projectId ? " selected" : ""}>${ESC(p.name)}</option>`)
+          .join("")}</select>
+      </label>
+      <label class="fld">工作区
+        <span class="wt"><input type="checkbox" id="dwWt"${d.worktree ? " checked" : ""}><span>全新 worktree</span>
+        <input type="text" id="dwWtName" value="${ESC(d.wtName)}" placeholder="worktree 名">
+        <input type="text" id="dwBase" value="${ESC(d.baseBranch)}" placeholder="基线分支"></span>
+      </label>
+      <label class="fld">模型
+        <select id="dwModel"><option value="">跟随当前默认</option>${opts(MODEL_PRESETS, d.model)}</select>
+      </label>
+      <label class="fld">思考级别
+        <select id="dwVariant">${opts(VARIANT_PRESETS, d.variant)}</select>
+      </label>
+      <label class="fld">智能体
+        <select id="dwAgent">${opts(AGENT_PRESETS, d.agent)}</select>
+      </label>
+      <div class="fine" style="margin-top:8px">补充提示词</div>
+      <textarea id="dwExtra" placeholder="约束、验收标准、不要碰的文件…">${ESC(d.extra)}</textarea>
+      <div class="fine" style="margin-top:8px">将发送</div>
+      <pre class="pv" id="dwPreview">${ESC(promptForDrawer(item))}</pre>
+      <div class="acts">
+        <button class="btn pri" data-drawer-go="1"${d.busy ? " disabled" : ""}>${d.busy ? "发起中…" : "开始会话"}</button>
+        <button class="btn" data-drawer-close="1">取消</button>
+      </div>
+      <div class="fine">选了三件套或 worktree 走 service（能指定模型）；都不改则走宿主 startSession（更轻）。</div>
+    </div></div>`;
 }
 
 /* ---------------- 事件 ---------------- */
@@ -493,6 +663,39 @@ function wire() {
   document.querySelectorAll("[data-close]").forEach((el) => {
     el.addEventListener("click", () => closeDetail());
   });
+  document.querySelectorAll("[data-start-session]").forEach((el) => {
+    el.addEventListener("click", () => openDrawer(el.dataset.startSession));
+  });
+  document.querySelectorAll("[data-drawer-close]").forEach((el) => {
+    el.addEventListener("click", () => closeDrawer());
+  });
+  const go = document.querySelector("[data-drawer-go]");
+  if (go) {
+    go.addEventListener("click", () => {
+      const d = state.drawer;
+      if (!d) return;
+      d.projectId = $("dwProject")?.value ?? d.projectId;
+      d.worktree = Boolean($("dwWt")?.checked);
+      d.wtName = $("dwWtName")?.value ?? d.wtName;
+      d.baseBranch = $("dwBase")?.value ?? d.baseBranch;
+      d.model = $("dwModel")?.value ?? "";
+      d.variant = $("dwVariant")?.value ?? "default";
+      d.agent = $("dwAgent")?.value ?? "build";
+      d.extra = $("dwExtra")?.value ?? "";
+      submitDrawer();
+    });
+  }
+  const extra = $("dwExtra");
+  if (extra) {
+    extra.addEventListener("input", () => {
+      const d = state.drawer;
+      if (!d) return;
+      d.extra = extra.value;
+      const item = state.board.items.find((i) => i.id === d.itemId);
+      const pv = $("dwPreview");
+      if (item && pv) pv.textContent = promptForDrawer(item);
+    });
+  }
   document.querySelectorAll("[data-setstate]").forEach((el) => {
     el.addEventListener("click", () => moveItem(el.dataset.setstate, el.dataset.to));
   });
@@ -537,6 +740,11 @@ function wire() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.drawer) {
+    e.preventDefault();
+    closeDrawer();
+    return;
+  }
   if (e.key === "Escape" && state.detail) {
     e.preventDefault();
     closeDetail();
