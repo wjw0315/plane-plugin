@@ -387,7 +387,7 @@ function viewFor(phase) {
   }
 
   if (phase === "setup") {
-    return `<form id="setupForm" class="form" autocomplete="off">
+    return `<div id="setupForm" class="form" autocomplete="off">
       <div class="t">连接 Plane</div>
       ${err ? `<div class="err">${ESC(err.code)}：${ESC(err.message)}</div>` : ""}
       <label>地址<input name="baseUrl" placeholder="http://192.168.1.188:8080" value="${ESC(c.baseUrl || "")}"></label>
@@ -395,10 +395,10 @@ function viewFor(phase) {
       <label>Workspace<input name="workspace" placeholder="g2" value="${ESC(c.workspace || "")}"></label>
       <label>API 版本<input name="apiVersion" list="versions" placeholder="v1 或 v2" value="${ESC(c.apiVersion || "v2")}">
         <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
-      <button type="submit">保存并连接</button>
+      <button type="button" id="setupSave">保存并连接</button>
       <div class="fine" id="saveState">${ESC(state.saveState)}</div>
       <div class="fine">Key 存在扩展自己的数据目录（600 权限），面板只拿到脱敏视图。</div>
-    </form>`;
+    </div>`;
   }
 
   if (phase === "error") {
@@ -716,21 +716,20 @@ function conclHTML() {
 /* ---------------- 事件 ---------------- */
 
 function wire() {
-  const form = $("setupForm");
-  if (form) {
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const btn = form.querySelector("button[type=submit]");
-      if (btn?.disabled) return;
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "保存中…";
-      }
+  const setupSave = $("setupSave");
+  if (setupSave) {
+    setupSave.addEventListener("click", () => {
+      if (setupSave.disabled) return;
+      const form = $("setupForm");
+      if (!form) return;
+      const input = (name) => form.querySelector(`input[name="${name}"]`);
+      setupSave.disabled = true;
+      setupSave.textContent = "保存中…";
       saveConfig({
-        baseUrl: form.baseUrl.value,
-        apiKey: form.apiKey.value,
-        workspace: form.workspace.value,
-        apiVersion: form.apiVersion.value,
+        baseUrl: input("baseUrl")?.value ?? "",
+        apiKey: input("apiKey")?.value ?? "",
+        workspace: input("workspace")?.value ?? "",
+        apiVersion: input("apiVersion")?.value ?? "",
       });
     });
   }
