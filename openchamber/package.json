@@ -1,6 +1,6 @@
 {
   "name": "openchamber-plane",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Plane 任务看板 —— OpenChamber guest 扩展",
   "type": "module",
@@ -27,7 +27,8 @@
         "id": "openchamber-plane",
         "name": "Plane",
         "icon": "layout-columns",
-        "entry": "panel/index.html"
+        "entry": "panel/index.html",
+        "mobile": true
       },
       "service": {
         "entry": "service/main.cjs",
@@ -45,7 +46,28 @@
           "turn-finished"
         ],
         "content": true
-      }
+      },
+      "commands": [
+        {
+          "name": "plane",
+          "description": "Plane 工作项：/plane XLMSC-24 挂成会话 chip"
+        }
+      ],
+      "links": {
+        "action": "open",
+        "identifier": {
+          "keys": [
+            "XLMSC"
+          ]
+        }
+      },
+      "actions": [
+        {
+          "id": "plane-bind",
+          "label": "Plane：挂到工作项",
+          "where": "session"
+        }
+      ]
     }
   }
 }

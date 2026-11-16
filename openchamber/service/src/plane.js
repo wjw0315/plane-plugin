@@ -255,3 +255,13 @@ export async function addComment(cfg, projectId, workItemId, text, { sessionId }
     createdAt: data?.created_at ? String(data.created_at) : new Date().toISOString(),
   };
 }
+
+/** 新建工作项（名称 + 目标状态；v1/v2 路径分支在 request 里）。 */
+export async function createWorkItem(cfg, projectId, name, stateId, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/`,
+    { method: "POST", body: { name, state: stateId }, fetchImpl },
+  );
+  return mapItem(data);
+}

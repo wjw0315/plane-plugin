@@ -1720,6 +1720,10 @@
     // 发起会话参数抽屉
     bindSheet: null,
     // 会话菜单动作带来的绑定 { sessionId, sessionTitle }
+    configEdit: false,
+    // 修改配置覆盖层
+    createForm: null,
+    // 新建工作项 { name, stateId, busy, error }
     toast: null,
     error: null,
     saveState: "",
@@ -1824,6 +1828,22 @@
       await loadBoard();
     } catch (e) {
       fail(e);
+    }
+  }
+  async function submitCreateItem(name, stateId) {
+    state.createForm.busy = true;
+    render();
+    try {
+      await callService("/create-work-item", {
+        body: { projectId: state.selected, name, stateId }
+      });
+      state.createForm = null;
+      await loadBoard();
+      showToast("\u5DE5\u4F5C\u9879\u5DF2\u521B\u5EFA");
+    } catch (e) {
+      state.createForm.busy = false;
+      state.createForm.error = { code: e.code || "CREATE_FAILED", message: e.message || String(e) };
+      render();
     }
   }
   async function loadBoard() {
@@ -1934,7 +1954,17 @@
       }
       state.saveState = "\u5DF2\u4FDD\u5B58\uFF0C\u6B63\u5728\u62C9\u9879\u76EE\u2026";
       await loadProjects();
-      state.saveState = "";
+      if (state.configEdit) {
+        state.configEdit = false;
+        state.error = null;
+        state.saveState = "";
+        render();
+        if (state.phase !== "board") setPhase("board");
+        else await loadBoard();
+        showToast("\u914D\u7F6E\u5DF2\u66F4\u65B0");
+      } else {
+        state.saveState = "";
+      }
     } catch (e) {
       state.saveState = "";
       fail(e);
@@ -2031,7 +2061,7 @@
       <div>\u9762\u677F\u8981\u901A\u8FC7\u5BBF\u4E3B\u624D\u80FD\u8BBF\u95EE\u672C\u5730 service\u3002\u88C5\u8FDB OpenChamber \u540E\u518D\u6253\u5F00\u8FD9\u4E2A\u9762\u677F\u3002</div></div>`;
     }
     if (phase === "setup") {
-      return `<form id="setupForm" class="form" autocomplete="off">
+      return `<div id="setupForm" class="form" autocomplete="off">
       <div class="t">\u8FDE\u63A5 Plane</div>
       ${err ? `<div class="err">${ESC2(err.code)}\uFF1A${ESC2(err.message)}</div>` : ""}
       <label>\u5730\u5740<input name="baseUrl" placeholder="http://192.168.1.188:8080" value="${ESC2(c.baseUrl || "")}"></label>
@@ -2039,10 +2069,10 @@
       <label>Workspace<input name="workspace" placeholder="g2" value="${ESC2(c.workspace || "")}"></label>
       <label>API \u7248\u672C<input name="apiVersion" list="versions" placeholder="v1 \u6216 v2" value="${ESC2(c.apiVersion || "v2")}">
         <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
-      <button type="submit">\u4FDD\u5B58\u5E76\u8FDE\u63A5</button>
+      <button type="button" id="setupSave">\u4FDD\u5B58\u5E76\u8FDE\u63A5</button>
       <div class="fine" id="saveState">${ESC2(state.saveState)}</div>
       <div class="fine">Key \u5B58\u5728\u6269\u5C55\u81EA\u5DF1\u7684\u6570\u636E\u76EE\u5F55\uFF08600 \u6743\u9650\uFF09\uFF0C\u9762\u677F\u53EA\u62FF\u5230\u8131\u654F\u89C6\u56FE\u3002</div>
-    </form>`;
+    </div>`;
     }
     if (phase === "error") {
       const retry = err?.code === "NETWORK" || err?.code === "RATE_LIMITED" ? `<button data-act="retry">\u91CD\u8BD5</button>` : "";
@@ -2058,7 +2088,7 @@
     if (phase === "board") {
       const detailId = state.detail?.id ?? null;
       const base = state.view === "list" ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "") : boardHTML({ ...state.board, detailId, canDrag: !isPhone() }) + (state.detail ? overlayDetailHTML() : "");
-      return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "") + (state.bindSheet ? bindSheetHTML() : "");
+      return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "") + (state.bindSheet ? bindSheetHTML() : "") + (state.configEdit ? configEditHTML() : "") + (state.createForm ? createItemHTML() : "");
     }
     return "";
   }
@@ -2298,21 +2328,20 @@
     </div></div>`;
   }
   function wire() {
-    const form = $("setupForm");
-    if (form) {
-      form.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const btn = form.querySelector("button[type=submit]");
-        if (btn?.disabled) return;
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = "\u4FDD\u5B58\u4E2D\u2026";
-        }
+    const setupSave = $("setupSave");
+    if (setupSave) {
+      setupSave.addEventListener("click", () => {
+        if (setupSave.disabled) return;
+        const form = $("setupForm");
+        if (!form) return;
+        const input = (name) => form.querySelector(`input[name="${name}"]`);
+        setupSave.disabled = true;
+        setupSave.textContent = "\u4FDD\u5B58\u4E2D\u2026";
         saveConfig({
-          baseUrl: form.baseUrl.value,
-          apiKey: form.apiKey.value,
-          workspace: form.workspace.value,
-          apiVersion: form.apiVersion.value
+          baseUrl: input("baseUrl")?.value ?? "",
+          apiKey: input("apiKey")?.value ?? "",
+          workspace: input("workspace")?.value ?? "",
+          apiVersion: input("apiVersion")?.value ?? ""
         });
       });
     }
@@ -2371,6 +2400,47 @@
         host.openSession(el.dataset.openSession).catch(() => showToast("\u8DF3\u8F6C\u5931\u8D25", null, null, true));
       });
     });
+    const addItemBtn = $("addItem");
+    if (addItemBtn) {
+      addItemBtn.hidden = state.phase !== "board";
+      addItemBtn.addEventListener("click", () => {
+        state.createForm = { name: "", stateId: "", busy: false, error: null };
+        render();
+      });
+    }
+    const cfgBtn = $("cfgBtn");
+    if (cfgBtn) {
+      cfgBtn.addEventListener("click", () => {
+        state.configEdit = true;
+        render();
+      });
+    }
+    const cfgForm = $("cfgForm");
+    if (cfgForm) {
+      cfgForm.addEventListener("click", (e) => {
+        if (e.target.id !== "cfgSave") return;
+        const input = (name) => cfgForm.querySelector(`input[name="${name}"]`);
+        saveConfig({
+          baseUrl: input("baseUrl")?.value ?? "",
+          apiKey: input("apiKey")?.value ?? "",
+          workspace: input("workspace")?.value ?? "",
+          apiVersion: input("apiVersion")?.value ?? ""
+        }).then(() => {
+          state.configEdit = false;
+          render();
+        });
+      });
+    }
+    const ciForm = $("ciForm");
+    if (ciForm) {
+      ciForm.addEventListener("click", (e) => {
+        const name = $("ciName")?.value ?? "";
+        const stateId = $("ciState")?.value ?? "";
+        if (e.target.id !== "ciSave") return;
+        if (!name.trim() || !stateId) return;
+        submitCreateItem(name.trim(), stateId);
+      });
+    }
     document.querySelectorAll("[data-concl-close]").forEach((el) => {
       el.addEventListener("click", () => closeConcl());
     });
@@ -2454,6 +2524,12 @@
     }
   }
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.createForm) {
+      e.preventDefault();
+      state.createForm = null;
+      render();
+      return;
+    }
     if (e.key === "Escape" && state.bindSheet) {
       e.preventDefault();
       state.bindSheet = null;

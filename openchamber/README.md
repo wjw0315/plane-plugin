@@ -19,7 +19,10 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 - **05 任务详情**（完成）：点卡片开详情（列视图=覆盖页、列表视图=就地展开），字段含状态/编号/优先级/指派/标签/会话/描述；详情里可切状态、在 Plane 打开、复制链接；Esc / 返回 / 收起关闭
 - **06 发起会话**（完成）：详情里「发起会话」开参数抽屉（项目 / 全新 worktree / 模型 / 思考级别 / 智能体 / 补充提示词 + prompt 预览）；默认走宿主 `startSession`，选了三件套或 worktree 走 service `sessions.start`（可先 `git worktree add`）；成功后打 `oc-<sessionId>` 标签并推 In Progress
 - **07 手动回填结论**（完成）：详情「回填结论…」开草稿抽屉，写入 `POST /comment`（纯文本转 HTML，首行标来源会话），成功后卡片与详情出现「✓ 结论」；失败保留草稿可重试；只追加评论不改描述
-- 08 起：自动回填（订阅会话事件）
+- **08 自动回填结论**（完成）：订阅 `turn-finished` 会话事件（transcript 授权），把 agent 最终答复自动写成 Plane 评论；按 (工作项, 会话, 事件时间) 去重；截断标注；设置里 `autoBackfill` 可关（默认开）
+- **09 命令 / chip / 会话动作**（完成）：`/plane XLMSC-31` 回 chip、聊天里的编号点击开详情、会话菜单「Plane：挂到工作项」开绑定抽屉；卡片 ⌘ 角标点击跳会话
+- **10 改配置 + 新建工作项**（完成）：底部「设置」开配置覆盖层（合并保存，Key 留空不变；含「自动回填结论」开关）；看板头部「＋」新建工作项（名称 + 目标状态），创建后自动刷新看板
+- issue 10（移动端 opt-in / 体验打磨）：另一条并行线，见上方说明
 
 ## 安装
 
@@ -32,6 +35,8 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 
 > 文件夹安装从原目录运行：改完代码 `npm run build`，再在面板里重载即可，不用重装。
 > 换成 zip / git 安装时只发构建产物（`panel/main.js`、`service/main.cjs`），宿主不会编译。
+
+> **手机上怎么看面板**：手机端要 manifest 显式写 `contributes.panel.mobile: true`，面板才会变成手机工作区抽屉里的一个 tab（没有这个键，手机上就是没有面板，open 模式的菜单动作也不出现）。本扩展已经开了。改完 manifest 要在宿主里**重新加载扩展**，手机端重连后才认。手机上默认给列表视图（看板拖拽是 HTML5 DnD，触控拖不动）；改状态走列表的「移动到」下拉或详情页里的状态按钮。
 
 ## 开发
 
@@ -68,6 +73,8 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `POST /work-items` | 列工作项（可按 `stateId` 过滤；v1 无 identifier 时用 `sequence_id`） |
 | `POST /work-item` | 取单条工作项 + 描述文本（详情用；HTML 转纯文本） |
 | `POST /patch-state` | 改工作项状态（拖拽落列 / 详情里切） |
+| `POST /create-work-item` | 新建工作项（名称 + 目标状态，走 Plane 建卡接口） |
+| `POST /comment` | 结论回填：纯文本 → 评论 HTML（分段 + 来源会话），追加到工作项 |
 | `POST /session-start` | 由 service 发起会话（可指定 model/variant/agent；需要时先建 worktree） |
 | `POST /bind-session` | 给工作项追加 `oc-<sessionId>` 标签（可顺带推状态） |
 | `POST /comment` | 结论回填：纯文本 → 评论 HTML（分段 + 来源会话），追加到工作项 |
@@ -85,7 +92,7 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 - service 只监听 `127.0.0.1`，端口与令牌来自 `OPENCHAMBER_SERVICE_PORT` / `OPENCHAMBER_SERVICE_TOKEN`。
 - **每个请求（含 `/health`）都要带** `Authorization: Bearer <token>`；宿主轮询 `/health` 到 200 才把状态标成 ready。
 - service 不继承宿主环境（只有 PATH/HOME/temp/locale）；要落盘就写 `OPENCHAMBER_SERVICE_DATA_DIR`。
-- 扩展只在 OpenChamber 桌面端与 Web 端加载；VS Code 与移动端不支持。
+- 扩展在 OpenChamber 桌面端与 Web 端加载；**VS Code 不加载**。移动端（手机 App / 移动版 Web）需要 manifest 里 `contributes.panel.mobile: true` 显式 opt-in，本扩展已开（见 [issue 10](../../.scratch/openchamber-plane-plugin/issues/10-mobile-panel-optin.md)）。
 
 ## 已知坑
 

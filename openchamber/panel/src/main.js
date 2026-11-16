@@ -28,6 +28,8 @@ const state = {
   detail: null, // { id, item, description, loading, error }
   drawer: null, // 发起会话参数抽屉
   bindSheet: null, // 会话菜单动作带来的绑定 { sessionId, sessionTitle }
+  configEdit: false, // 修改配置覆盖层
+  createForm: null, // 新建工作项 { name, stateId, busy, error }
   toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
@@ -140,6 +142,23 @@ async function loadProjects() {
     await loadBoard();
   } catch (e) {
     fail(e);
+  }
+}
+
+async function submitCreateItem(name, stateId) {
+  state.createForm.busy = true;
+  render();
+  try {
+    await callService("/create-work-item", {
+      body: { projectId: state.selected, name, stateId },
+    });
+    state.createForm = null;
+    await loadBoard();
+    showToast("工作项已创建");
+  } catch (e) {
+    state.createForm.busy = false;
+    state.createForm.error = { code: e.code || "CREATE_FAILED", message: e.message || String(e) };
+    render();
   }
 }
 
@@ -266,7 +285,18 @@ async function saveConfig(fields) {
     }
     state.saveState = "已保存，正在拉项目…";
     await loadProjects();
-    state.saveState = "";
+    // 从「修改配置」覆盖层保存的：关掉覆盖层并刷新看板
+    if (state.configEdit) {
+      state.configEdit = false;
+      state.error = null;
+      state.saveState = "";
+      render();
+      if (state.phase !== "board") setPhase("board");
+      else await loadBoard();
+      showToast("配置已更新");
+    } else {
+      state.saveState = "";
+    }
   } catch (e) {
     state.saveState = "";
     fail(e);
@@ -424,7 +454,9 @@ function viewFor(phase) {
       base +
       (state.drawer ? drawerHTML() : "") +
       (state.concl ? conclHTML() : "") +
-      (state.bindSheet ? bindSheetHTML() : "")
+      (state.bindSheet ? bindSheetHTML() : "") +
+      (state.configEdit ? configEditHTML() : "") +
+      (state.createForm ? createItemHTML() : "")
     );
   }
 
@@ -791,6 +823,48 @@ function wire() {
       host.openSession(el.dataset.openSession).catch(() => showToast("跳转失败", null, null, true));
     });
   });
+
+  const addItemBtn = $("addItem");
+  if (addItemBtn) {
+    addItemBtn.hidden = state.phase !== "board";
+    addItemBtn.addEventListener("click", () => {
+      state.createForm = { name: "", stateId: "", busy: false, error: null };
+      render();
+    });
+  }
+  const cfgBtn = $("cfgBtn");
+  if (cfgBtn) {
+    cfgBtn.addEventListener("click", () => {
+      state.configEdit = true;
+      render();
+    });
+  }
+  const cfgForm = $("cfgForm");
+  if (cfgForm) {
+    cfgForm.addEventListener("click", (e) => {
+      if (e.target.id !== "cfgSave") return;
+      const input = (name) => cfgForm.querySelector(`input[name="${name}"]`);
+      saveConfig({
+        baseUrl: input("baseUrl")?.value ?? "",
+        apiKey: input("apiKey")?.value ?? "",
+        workspace: input("workspace")?.value ?? "",
+        apiVersion: input("apiVersion")?.value ?? "",
+      }).then(() => {
+        state.configEdit = false;
+        render();
+      });
+    });
+  }
+  const ciForm = $("ciForm");
+  if (ciForm) {
+    ciForm.addEventListener("click", (e) => {
+      const name = $("ciName")?.value ?? "";
+      const stateId = $("ciState")?.value ?? "";
+      if (e.target.id !== "ciSave") return;
+      if (!name.trim() || !stateId) return;
+      submitCreateItem(name.trim(), stateId);
+    });
+  }
   document.querySelectorAll("[data-concl-close]").forEach((el) => {
     el.addEventListener("click", () => closeConcl());
   });
@@ -877,6 +951,12 @@ function wire() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.createForm) {
+    e.preventDefault();
+    state.createForm = null;
+    render();
+    return;
+  }
   if (e.key === "Escape" && state.bindSheet) {
     e.preventDefault();
     state.bindSheet = null;

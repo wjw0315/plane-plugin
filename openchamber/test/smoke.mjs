@@ -41,6 +41,7 @@ async function checkManifest() {
   const m = parsed.manifest;
   check("apiVersion = 1", m.apiVersion === 1);
   check("有 panel 入口", Boolean(m.contributes?.panel?.entry));
+  check("panel.mobile = true（手机端抽屉才有这个面板 tab）", m.contributes?.panel?.mobile === true);
   check("有 service 入口且 runtime = host", Boolean(m.contributes?.service?.entry) && m.contributes?.service?.runtime === "host");
   for (const f of [m.contributes?.panel?.entry, m.contributes?.service?.entry, "panel/main.js"].filter(Boolean)) {
     let ok = true;
@@ -96,6 +97,18 @@ const fakePlane = http.createServer((req, res) => {
       { id: "s2", name: "Todo", sequence: 2000, color: "#333" },
       { id: "s1", name: "Backlog", sequence: 1000, color: "#aaa" },
     ] });
+  }
+  if (req.method === "POST" && path === "/api/v1/workspaces/g2/projects/p1/issues/") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const body = JSON.parse(raw || "{}");
+      plane.created = plane.created || [];
+      const item = { id: "c" + plane.created.length, name: body.name || "", state: body.state || "", sequence_id: 99 + plane.created.length, priority: "none", assignees: [], labels: [] };
+      plane.created.push(item);
+      json(201, item);
+    });
+    return;
   }
   if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/p1/issues/") {
     return json(200, { results: [
@@ -414,6 +427,30 @@ try {
     body: "不是事件",
   });
   check("坏信封 → 400", bad.status === 400);
+
+  /* ---------------- 10 片：改配置（合并保存）+ 新建工作项 ---------------- */
+
+  // 合并保存：只传 workspace 与 autoBackfill，Key 与地址保持不变
+  const merged = await call("/config", { method: "POST", body: { workspace: "g2", autoBackfill: false } });
+  check("部分保存 → configured 保持", merged.status === 200 && merged.body?.config?.configured === true);
+  check("autoBackfill 关闭生效", merged.body?.config?.autoBackfill === false);
+
+  const badBase = await call("/config", { method: "POST", body: { baseUrl: "http://127.0.0.1:18792/api/v1" } });
+  check("地址带 /api 后缀 → BAD_CONFIG", badBase.status === 400 && badBase.body?.error?.code === "BAD_CONFIG");
+
+  // 新建工作项
+  plane.mode = "ok";
+  const created = await call("/create-work-item", {
+    method: "POST",
+    body: { projectId: "p1", name: "面板直建测试", stateId: "s2" },
+  });
+  check("新建工作项成功", created.status === 200 && created.body?.item?.name === "面板直建测试" && created.body?.item?.stateId === "s2", JSON.stringify(created.body).slice(0, 160));
+
+  const missingName = await call("/create-work-item", { method: "POST", body: { projectId: "p1" } });
+  check("缺名称 → BAD_CONFIG", missingName.status === 400 && missingName.body?.error?.code === "BAD_CONFIG");
+
+  // 恢复 autoBackfill 供后续用例
+  await call("/config", { method: "POST", body: { autoBackfill: true } });
 
   plane.mode = "ok";
   const badUrl = await call("/config", {

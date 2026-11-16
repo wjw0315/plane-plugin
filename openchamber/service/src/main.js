@@ -20,8 +20,8 @@
  *   POST /bind-session 给工作项追加 oc-<sessionId> 标签（可顺带推状态）
  */
 import http from "node:http";
-import { loadConfig, saveConfig, maskConfig } from "./config.js";
-import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, addComment, PlaneError } from "./plane.js";
+import { loadConfig, saveConfig, maskConfig, mergeConfig } from "./config.js";
+import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, addComment, createWorkItem, PlaneError } from "./plane.js";
 import { startSession, rememberBinding } from "./session.js";
 import { handleSessionEvent, SESSION_EVENTS_ROUTE } from "./session-events.js";
 
@@ -48,7 +48,7 @@ function sendJson(res, status, body) {
 }
 
 function sendError(res, err) {
-  const code = err instanceof PlaneError ? err.code : "INTERNAL";
+  const code = err.code || (err instanceof PlaneError ? "INTERNAL" : "INTERNAL");
   const message = err instanceof Error ? err.message : String(err);
   const status = STATUS_FOR_CODE[code] ?? 500;
   if (code === "INTERNAL") console.error("[plane] 内部错误:", err);
@@ -92,7 +92,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.5.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.10.0" });
       return;
     }
 
@@ -102,6 +102,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && path === "/config") {
+      // 合并保存：非空字段才覆盖（Key 留空 = 保持不变）
+      const body = await readBody(req);
+      await mergeConfig(process.env, body);
+      sendJson(res, 200, { ok: true, config: maskConfig(await loadConfig(process.env)) });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/create-work-item") {
+      const body = await readBody(req);
+      if (!body.projectId || !String(body.name || "").trim() || !body.stateId) {
+        throw new PlaneError("BAD_CONFIG", "create-work-item 需要 projectId / name / stateId");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const item = await createWorkItem(cfg, body.projectId, String(body.name).trim(), body.stateId);
+      sendJson(res, 200, { ok: true, item });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/config-legacy") {
+      // 直存：会覆盖整份配置（含空字段），面板日常不走这条
       const body = await readBody(req);
       const cfg = normalizeConfig(body);
       // 保存时允许缺字段（用户可以分步填），只在真正调用 Plane 时要求完整

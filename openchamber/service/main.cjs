@@ -3527,8 +3527,28 @@ function maskConfig(cfg) {
     baseUrl,
     workspace,
     apiVersion: String(cfg.apiVersion || "v2"),
-    hasKey
+    hasKey,
+    autoBackfill: cfg.autoBackfill !== false
   };
+}
+async function mergeConfig(env, incoming = {}) {
+  const current = await loadConfig(env) || {};
+  const out = { ...current };
+  if (typeof incoming.baseUrl === "string" && incoming.baseUrl.trim()) {
+    const base = incoming.baseUrl.trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//i.test(base) || /\/api(\/v\d)?$/i.test(base)) {
+      throw Object.assign(new Error("\u5730\u5740\u8981\u4EE5 http(s):// \u5F00\u5934\uFF0C\u4E14\u4E0D\u8981\u5E26 /api \u6216 /api/v1 \u540E\u7F00"), { code: "BAD_CONFIG" });
+    }
+  }
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k === "autoBackfill") {
+      if (typeof v === "boolean") out.autoBackfill = v;
+      continue;
+    }
+    if (typeof v === "string" && v.trim() !== "") out[k] = v.trim();
+  }
+  await saveConfig(env, out);
+  return out;
 }
 
 // service/src/plane.js
@@ -3719,6 +3739,14 @@ async function addComment(cfg, projectId, workItemId, text, { sessionId } = {}, 
     createdAt: data?.created_at ? String(data.created_at) : (/* @__PURE__ */ new Date()).toISOString()
   };
 }
+async function createWorkItem(cfg, projectId, name, stateId, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/`,
+    { method: "POST", body: { name, state: stateId }, fetchImpl }
+  );
+  return mapItem(data);
+}
 
 // service/src/session.js
 var import_node_child_process = require("node:child_process");
@@ -3846,7 +3874,7 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 function sendError(res, err) {
-  const code = err instanceof PlaneError ? err.code : "INTERNAL";
+  const code = err.code || (err instanceof PlaneError ? "INTERNAL" : "INTERNAL");
   const message = err instanceof Error ? err.message : String(err);
   const status = STATUS_FOR_CODE[code] ?? 500;
   if (code === "INTERNAL") console.error("[plane] \u5185\u90E8\u9519\u8BEF:", err);
@@ -3884,7 +3912,7 @@ var server = import_node_http.default.createServer(async (req, res) => {
   const path = (req.url || "").split("?")[0];
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.5.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.10.0" });
       return;
     }
     if (req.method === "GET" && path === "/config") {
@@ -3892,6 +3920,22 @@ var server = import_node_http.default.createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && path === "/config") {
+      const body = await readBody(req);
+      await mergeConfig(process.env, body);
+      sendJson(res, 200, { ok: true, config: maskConfig(await loadConfig(process.env)) });
+      return;
+    }
+    if (req.method === "POST" && path === "/create-work-item") {
+      const body = await readBody(req);
+      if (!body.projectId || !String(body.name || "").trim() || !body.stateId) {
+        throw new PlaneError("BAD_CONFIG", "create-work-item \u9700\u8981 projectId / name / stateId");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const item = await createWorkItem(cfg, body.projectId, String(body.name).trim(), body.stateId);
+      sendJson(res, 200, { ok: true, item });
+      return;
+    }
+    if (req.method === "POST" && path === "/config-legacy") {
       const body = await readBody(req);
       const cfg = normalizeConfig(body);
       await saveConfig(process.env, {

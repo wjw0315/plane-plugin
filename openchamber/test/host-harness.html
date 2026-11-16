@@ -21,16 +21,18 @@
 <body>
 <div class="row">
   <div class="frame">
-    <div style="display:flex;gap:6px;padding:6px;border-bottom:1px solid #232a33">
+    <div style="display:flex;gap:6px;padding:6px;border-bottom:1px solid #232a33;flex-wrap:wrap">
       <button id="fill">1. 填测试值</button>
       <button id="go">2. 点「保存并连接」</button>
       <button id="drag">3. 拖第一张卡到 Todo</button>
       <button id="toList">4. 切到列表视图</button>
       <button id="moveSel">5. 下拉改到 Todo</button>
-      <button id="openCard">6. 打开第一张卡详情</button>
+      <button id="openCard">6. 打开卡详情</button>
       <button id="esc">7. Esc 关闭详情</button>
-      <button id="startSess">8. 发起会话（默认路径）</button>
-      <button id="backfill">9. 回填结论</button>
+      <button id="simLink">8. 模拟聊天里点 XLMSC-31</button>
+      <button id="simAction">9. 模拟会话菜单动作</button>
+      <button id="startSess">10. 发起会话（默认路径）</button>
+      <button id="backfill">11. 回填结论</button>
     </div>
     <iframe id="panel" src="../panel/index.html" style="height:calc(100% - 34px)"></iframe>
   </div>
@@ -56,6 +58,8 @@ const V = 1;
 const EMPTY_GUEST_CONNECTION = { connected: true, account: "harness" };
 const logEl = document.getElementById("log");
 const frame = document.getElementById("panel");
+// 防缓存：每次打开都换 iframe 地址，面板与其资源必然重新拉取
+frame.src = `../panel/index.html?hcb=${Date.now()}`;
 
 // 假 service 的状态：点「保存并连接」后变成已配置 + 有项目
 const fake = {
@@ -133,6 +137,14 @@ function routeService(p) {
     if (!item) return { status: 404, body: JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "没有这条" } }) };
     return { status: 200, body: JSON.stringify({ ok: true, item, description: "第二页之后列表会把第 1 页的数据重复渲染。\n- 复现：翻到第 2 页\n- 期望：无重复" }) };
   }
+  if (path === "/create-work-item") {
+    const body = JSON.parse(p.body || "{}");
+    const seq = String((fake.items || []).length + 100);
+    const item = { id: "n" + seq, identifier: seq, name: body.name || "未命名", stateId: body.stateId || "s1", priority: "none", assignees: [], labels: [], concl: false };
+    fake.items.push(item);
+    log(`  create-work-item: ${item.name} → ${body.stateId}`);
+    return { status: 200, body: JSON.stringify({ ok: true, item }) };
+  }
   if (path === "/states") {
     return { status: 200, body: JSON.stringify({ ok: true, states: fake.states }) };
   }
@@ -168,6 +180,21 @@ window.addEventListener("message", (e) => {
       return;
     case "service-request":
       return reply(m.id, routeService(m.payload || {}));
+    case "resolve": {
+      const req = m.payload || {};
+      log(`  resolve /plane ${req.args || ""}`);
+      const card = (fake.items || []).find((i) => "XLMSC-" + i.identifier === req.args);
+      if (!card) return replyErr(m.id, "找不到工作项");
+      return reply(m.id, { item: {
+        providerId: "plane", id: card.id, kind: "issue",
+        title: `XLMSC-${card.identifier} ${card.name}`,
+        url: `http://192.168.1.188:8080/god-mode/projects/p1/issues/${card.id}`,
+        data: { workItemId: card.id },
+      }});
+    }
+    case "open-session":
+      log(`  open-session: ${m.payload?.sessionId}`);
+      return reply(m.id, undefined);
     case "workspace-read":
       return reply(m.id, { kind: "projects", state: "ready", projects: [
         { id: "ocproj", name: "xlm-scrm", directory: "/tmp/xlm-scrm" },
@@ -217,6 +244,18 @@ function fillPanel() {
   set("apiVersion", "v1");
   log("已把测试值填进面板表单", "ok");
 }
+function pushItem(item) {
+  // 宿主的 item 推送把条目包在 payload.item 里（见 SDK contract 的 HostItemMessage）
+  frame.contentWindow.postMessage({ channel: CHANNEL, v: V, type: "item", payload: { item } }, "*");
+}
+document.getElementById("simLink").addEventListener("click", () => {
+  pushItem({ kind: "link", identifier: "XLMSC-31", url: "http://192.168.1.188:8080/god-mode/projects/p1/issues/31" });
+  log("已推送 XLMSC-31 chip 点击", "ok");
+});
+document.getElementById("simAction").addEventListener("click", () => {
+  pushItem({ kind: "session", action: "plane-bind", sessionId: "ses_live_9", sessionTitle: "客户列表分页错乱", directory: "/tmp/xlm-scrm" });
+  log("已推送会话菜单动作", "ok");
+});
 window.fillPanel = fillPanel;
 document.getElementById("fill").addEventListener("click", fillPanel);
 document.getElementById("drag").addEventListener("click", () => {
@@ -298,7 +337,7 @@ document.getElementById("backfill").addEventListener("click", async () => {
 });
 
 document.getElementById("go").addEventListener("click", () => {
-  const btn = frame.contentDocument?.querySelector("#setupForm button[type=submit]");
+  const btn = frame.contentDocument?.querySelector("#setupSave");
   if (!btn) return log("点不到保存按钮（面板可能不在表单态）", "err");
   btn.click();
   log("已点击面板的保存按钮", "ok");

@@ -163,6 +163,7 @@
       <button type="button" data-view="list">列表</button>
     </div>
     <select id="proj" hidden></select>
+    <button id="addItem" type="button" hidden title="新建工作项">＋</button>
     <button id="refresh" type="button" title="重新拉取">↻</button>
   </header>
   <div id="crash" class="crash" hidden></div>
@@ -172,8 +173,8 @@
     <span>宿主</span><span id="hostState">—</span>
     <span>· service</span><span id="svcState">—</span>
     <span class="grow"></span>
-    <span>配置在扩展数据目录</span>
+    <button id="cfgBtn" type="button">设置</button>
   </footer>
-  <script src="./main.js"></script>
+  <script src="./main.js?v=0.9.0"></script>
 </body>
 </html>
