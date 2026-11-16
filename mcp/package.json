@@ -1,0 +1,19 @@
+{
+  "name": "plane-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "把自托管 Plane v2 API 暴露成 MCP server（宿主无关）",
+  "scripts": {
+    "start": "tsx server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  }
+}

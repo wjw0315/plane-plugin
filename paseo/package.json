@@ -11,10 +11,9 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "mcp": "tsx mcp/server.ts"
+    "test": "tsx tests/plane-api.test.ts && tsx tests/plane-webhook.test.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

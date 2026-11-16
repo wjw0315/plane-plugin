@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import type { PlaneConfig } from "../shared/plane-settings";
+import type { PlaneConfig } from "../paseo/shared/plane-config";
 import {
   listProjects,
   listStates,
@@ -13,7 +13,7 @@ import {
   createLabel,
   ensureLabel,
   PlaneApiError,
-} from "../server/plane-api";
+} from "../paseo/server/plane-api";
 
 /**
  * Plane MCP Server —— 把自托管 Plane（plane.so）v2 REST API 暴露给 codeg 等 MCP 客户端。
@@ -24,7 +24,8 @@ import {
  *   PLANE_WORKSPACE  目标 workspace 标识（slug 或 uuid）
  *   PLANE_API_VERSION  API 版本，默认 v2（Plane 1.x 新 API）；Plane 0.x 实例用 v1
  *
- * 复用 ../server/plane-api.ts 的 API 客户端，零重复逻辑。
+ * 复用 ../paseo/server/plane-api.ts 的 API 客户端，零重复逻辑；
+ * 配置类型取自 ../paseo/shared/plane-config.ts（纯定义，不依赖 Paseo SDK）。
  */
 
 function loadConfig(): PlaneConfig {

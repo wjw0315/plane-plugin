@@ -1,68 +1,52 @@
-# Plane 任务看板插件（Paseo Plugin）
+# plane-plugin
 
-在 [Paseo](https://paseo.sh) 中查看和管理自托管 [Plane](https://plane.so) 团队任务看板：
-动态列、拖拽改状态、Paseo 会话与 Plane 工作项双向同步。
+Plane 任务看板插件仓库。两套宿主、两套插件代码，同一个仓库：
 
-## 功能
+| 目录 | 宿主 | 说明 |
+| --- | --- | --- |
+| `paseo/` | [Paseo](https://paseo.sh) | 看板屏幕、会话 ↔ 工作项同步、webhook 反向同步 |
+| `openchamber/` | [OpenChamber](https://openchamber.dev) | guest 扩展：rail 面板 + service，看板读写、会话发起与结论回填 |
+| `mcp/` | 任意 MCP 客户端 | Plane v2 API 的 MCP server（stdio），宿主无关 |
 
-- **任务看板**：顶部切换 Plane 项目，下方按 Plane 状态渲染动态列，拖拽卡片即可改状态（`patch-state`）。
-- **配置管理**：内置设置页（host 级），填写自托管 Plane 地址、API Key、workspace，走 Plane v2 API。
-- **会话 → 工作项同步**：带 `plane:project` 标签的会话在生命周期内自动创建并流转对应工作项：
-
-  | 会话事件 | 工作项状态 |
-  | --- | --- |
-  | `agent.created` | Backlog（标题取会话名，打 `paseo-<agentId>` 标签） |
-  | `agent.turn_started` | In Progress |
-  | `agent.closed` / `agent.archived` | Done |
-
-- **工作项 → 会话（webhook，可选）**：开启后插件启动本地 HTTP 服务器，接收 Plane
-  `workitem.*` 事件，HMAC-SHA256 校验签名后反查关联会话并推送状态变更通知。
+两套插件各自独立：依赖、构建、测试都在自己的子目录里跑，互不相干。
+仓库根只放文档与规格（`docs/`、`.scratch/`）。
 
 ## 目录结构
 
+```text
+plane-plugin/
+  paseo/                    Paseo 插件（TypeScript / React Native）
+    paseo-plugin.json       插件 manifest
+    index.server.ts         server 入口
+    index.client.tsx        client 入口
+    client/ server/ shared/ mcp/ tests/
+  openchamber/              OpenChamber 扩展（纯 JS）
+    panel/                  面板（宿主加载 iframe）
+    service/                本地 service（宿主拉起）
+    test/                   冒烟测试 + 假宿主 harness
+  mcp/                      Plane MCP server（独立小包，宿主无关）
+    server.ts               stdio MCP server，8 个工具
+  docs/                     仓库级约定（issue tracker、标签、领域模型）
+  .scratch/                 规格与切片
 ```
-index.server.ts          插件 server 入口：注册配置、RPC、会话同步钩子、webhook
-index.client.tsx         插件 client 入口，装配各贡献点
-server/
-  plane-api.ts           Plane v2 REST API 客户端（X-Api-Key 认证、PlaneApiError）
-  plane-webhook.ts       Webhook 签名校验与 HTTP 服务器
-client/
-  plane-screen.tsx       看板屏幕（项目切换、动态列、拖拽改状态）
-  plane-sidebar-entry.tsx 侧边栏头部入口
-  plane-contribute.tsx   装配 screen / sidebar / command center / settings 四个贡献点
-  plane-settings-page.tsx 配置设置页
-shared/                  server 与 client 共享的 schema、RPC 与配置定义
-tests/                   API 与 webhook 的单元测试
-```
 
-## 配置
+## 安装
 
-在 Paseo 设置页「Plane」中填写：
+两套插件都**只能用「添加文件夹」安装**，别选仓库根：
 
-| 字段 | 说明 |
-| --- | --- |
-| `baseUrl` | 自托管 Plane 地址，如 `http://plane.example.com` |
-| `apiKey` | Plane API Key（`X-Api-Key` 认证） |
-| `workspace` | 目标 workspace 标识 |
-| `apiVersion` | 保留字段，当前实现固定走 Plane v2 API |
-| `webhookEnabled` | 是否启用反向 webhook |
-| `webhookSecret` | Webhook 签名密钥（HMAC-SHA256，hex） |
-| `webhookPort` | Webhook 监听端口，默认 `8788` |
-
-配置由 daemon 通过 `server.registerSettings` 持久化，客户端经 `settingsRpc` 读写；
-各字段独立降级到默认值，单个非法值不会使整条配置失效。
-
-## 同步机制
-
-- **目标项目来自会话标签**：会话打上 `plane:project=<项目 uuid>` 标签后，其生命周期内的所有状态变更才会同步；无标签的会话不创建工作项，避免产生孤立项。
-- 同步状态（`agentId → { projectId, workItemId, phase }`）保存在 server 内存中，插件重载后重置，重载后以工作项标签 `paseo-<agentId>` 反查会话。
-- 会话 → 工作项的流转是幂等的：目标阶段与当前一致时跳过。
+- Paseo：选 `plane-plugin/paseo`
+- OpenChamber：选 `plane-plugin/openchamber`
 
 ## 开发
 
 ```bash
-npm install
-npm run typecheck
+cd paseo       && npm install && npm run typecheck
+cd openchamber && npm install && npm run build && npm test
+cd mcp         && npm install && npm run typecheck
 ```
 
-要求 Paseo `>= 0.14.0`。`tests/` 下有 API 与 webhook 的单元测试，当前仓库未配置测试运行器。
+细节看各自的 README：
+
+- [paseo/README.md](paseo/README.md)
+- [openchamber/README.md](openchamber/README.md)
+- [mcp/README.md](mcp/README.md)

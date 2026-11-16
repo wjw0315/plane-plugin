@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import type { PlaneConfig } from "../shared/plane-settings";
+import type { PlaneConfig } from "../shared/plane-config";
 
 /** Plane webhook 载荷（v2 结构）的解析结果。 */
 export interface WebhookEvent {

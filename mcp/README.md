@@ -2,7 +2,11 @@
 
 把自托管 [Plane](https://plane.so) v2 REST API 封装为 MCP server，供 codeg 等 MCP 客户端直接调用，无需打开 Plane 平台。
 
-复用 `../server/plane-api.ts` 的 API 客户端，零重复逻辑。
+复用 `../paseo/server/plane-api.ts` 的 API 客户端，零重复逻辑；配置类型取自
+`../paseo/shared/plane-config.ts`（纯定义，不依赖 Paseo SDK）。
+
+> 本目录是**宿主无关**的独立小包，跟 Paseo 插件（`../paseo/`）、OpenChamber 扩展（`../openchamber/`）
+> 各自一套依赖，只共用 Plane API 客户端源码。
 
 ## 工具
 
@@ -47,8 +51,8 @@ codeg 的 MCP 配置为 stdio 类型，`command` 指向 `tsx`，`args` 指向本
 {
   "mcpServers": {
     "plane": {
-      "command": "npx",
-      "args": ["tsx", "/Users/jiaweiwu/baidu_backup/macm1air/work/project/plane-plugin/mcp/server.ts"],
+      "command": "/Users/jiaweiwu/baidu_backup/macm1air/work/project/plane-plugin/mcp/node_modules/.bin/tsx",
+      "args": ["/Users/jiaweiwu/baidu_backup/macm1air/work/project/plane-plugin/mcp/server.ts"],
       "env": {
         "PLANE_BASE_URL": "http://your-plane-host",
         "PLANE_API_KEY": "your-api-key",
@@ -59,12 +63,13 @@ codeg 的 MCP 配置为 stdio 类型，`command` 指向 `tsx`，`args` 指向本
 }
 ```
 
-> 路径按本机实际位置调整；若 codeg 的 MCP 配置界面字段名不同，以界面为准，填 command / args / env 三项即可。
+> 路径按本机实际位置调整；`command` 指向本目录自带的 `tsx`（mcp 有独立 node_modules，别用系统全局的）。
+> 若 codeg 的 MCP 配置界面字段名不同，以界面为准，填 command / args / env 三项即可。
 
 ## 本地验证
 
 ```bash
-npm run mcp
-# 或直接发 stdio 请求验证
-npm run typecheck
+npm install
+npm run typecheck   # tsc --noEmit
+npm start           # tsx server.ts（stdio）
 ```

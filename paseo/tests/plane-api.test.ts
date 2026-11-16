@@ -11,7 +11,7 @@ import {
   resolveSessionAgentId,
   PlaneApiError,
 } from "../server/plane-api";
-import type { PlaneConfig } from "../shared/plane-settings";
+import type { PlaneConfig } from "../shared/plane-config";
 
 const CONFIG: PlaneConfig = {
   baseUrl: "https://plane.example.com",

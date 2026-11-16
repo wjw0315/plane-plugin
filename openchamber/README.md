@@ -8,7 +8,7 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 - 切片：`.scratch/openchamber-plane-plugin/issues/01`–`09`
 - 原型（一次性）：`.scratch/openchamber-plane-plugin/prototype/panel-prototype.html`
 
-> 为什么是子目录而不是独立仓库：spec / issues 在这里，代码隔一个仓库每次都要跳。代价是**只能用「添加文件夹」安装**——OpenChamber 的 git / zip 安装读的是仓库根的 `openchamber` 块，而根 `package.json` 是 Paseo 插件清单。
+> 为什么是子目录而不是独立仓库：spec / issues 在这里，代码隔一个仓库每次都要跳。代价是**只能用「添加文件夹」安装**——OpenChamber 的 git / zip 安装读的是仓库根的 `openchamber` 块，而仓库根现在是宿主目录（两套插件各自一个子目录：`paseo/`、`openchamber/`）。
 
 ## 现在到哪了
 
@@ -41,13 +41,13 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 ## 开发
 
 ```bash
-cd openchamber        # 仓库根是 Paseo 插件，两套依赖互不相干
+cd openchamber        # 两套插件各装各的依赖，互不相干
 npm install
 npm run build         # panel → IIFE，service → CJS
 npm test              # manifest 能被宿主解析 + service 契约冒烟
 ```
 
-根目录的 `npm run typecheck` 不受影响：`tsconfig` 只收 `.ts/.tsx`，这里是纯 JS，两套构建各走各的。
+Paseo 插件的类型检查在 `paseo/` 目录跑（`cd ../paseo && npm run typecheck`）：`tsconfig` 只收 `.ts/.tsx`，这里是纯 JS，两套构建各走各的。
 
 ## 目录
 

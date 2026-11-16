@@ -1,4 +1,4 @@
-import type { PlaneConfig } from "../shared/plane-settings";
+import type { PlaneConfig } from "../shared/plane-config";
 import type { planeStateSchema, planeWorkItemSchema, planeProjectSchema } from "../shared/plane-rpc";
 import { z } from "zod";
 

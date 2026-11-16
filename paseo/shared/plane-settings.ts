@@ -1,5 +1,5 @@
 import { defineSettings } from "@getpaseo/plugin";
-import { z } from "zod";
+import { planeConfigSchema } from "./plane-config";
 
 /**
  * Plane 插件配置：连接自托管 Plane 实例并选择目标 workspace。
@@ -13,15 +13,7 @@ export const PLANE_SETTINGS = defineSettings({
   id: "plane",
   scope: "host",
   version: 2,
-  schema: z.object({
-    baseUrl: z.string().default(""),
-    apiKey: z.string().default(""),
-    workspace: z.string().default(""),
-    apiVersion: z.enum(["v1", "v2"]).default("v2"),
-    webhookEnabled: z.boolean().default(false),
-    webhookSecret: z.string().default(""),
-    webhookPort: z.number().int().min(1).max(65535).default(8788),
-  }),
+  schema: planeConfigSchema,
 });
 
-export type PlaneConfig = z.infer<typeof PLANE_SETTINGS.schema>;
+export type { PlaneConfig } from "./plane-config";
