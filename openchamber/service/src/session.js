@@ -69,3 +69,17 @@ export async function startSession(env, input) {
 
   return { sessionId: started.sessionId, directory: started.directory ?? directory ?? null, worktree };
 }
+
+/* ---------------- 08 片：会话 → 工作项 的映射 ---------------- */
+
+const bindings = new Map(); // sessionId → { workItemId, projectId }
+
+export function rememberBinding(sessionId, { workItemId, projectId }) {
+  if (sessionId && workItemId && projectId) {
+    bindings.set(String(sessionId), { workItemId: String(workItemId), projectId: String(projectId) });
+  }
+}
+
+export function readBindings() {
+  return Object.fromEntries(bindings.entries());
+}

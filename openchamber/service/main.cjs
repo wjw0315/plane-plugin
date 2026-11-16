@@ -1028,13 +1028,13 @@ var init_waits = __esm({
       for (const entry of wire.waits) {
         if (Object(entry) !== entry || entry.state === void 0)
           return null;
-        const { id, type, state } = entry;
+        const { id, type, state: state2 } = entry;
         if (String(id) !== id || id.length === 0 || String(type) !== type || type.length === 0)
           return null;
         const args = argsOf(entry.args);
         if (!args)
           return null;
-        waits.push({ id, type, args, state });
+        waits.push({ id, type, args, state: state2 });
       }
       return { v: WAITS_WIRE_VERSION, requestId, waits };
     };
@@ -3769,6 +3769,62 @@ async function startSession(env, input) {
   });
   return { sessionId: started.sessionId, directory: started.directory ?? directory ?? null, worktree };
 }
+var bindings = /* @__PURE__ */ new Map();
+function rememberBinding(sessionId, { workItemId, projectId }) {
+  if (sessionId && workItemId && projectId) {
+    bindings.set(String(sessionId), { workItemId: String(workItemId), projectId: String(projectId) });
+  }
+}
+function readBindings() {
+  return Object.fromEntries(bindings.entries());
+}
+
+// service/src/session-events.js
+init_dist();
+var SESSION_EVENTS_ROUTE = SESSION_EVENTS_PATH;
+var seen = /* @__PURE__ */ new Set();
+function replyText(reply, truncated) {
+  const cut = truncated ? "\n\n\uFF08\u26A0 \u7B54\u590D\u8D85\u8FC7 64000 \u5B57\u7B26\u88AB\u622A\u65AD\uFF0C\u4EE5\u4E0A\u662F\u524D\u534A\u90E8\u5206\uFF09" : "";
+  return `${reply}${cut}`;
+}
+async function handleSessionEvent(env, rawBody) {
+  const event = readSessionEventRequest(rawBody);
+  if (!event) return { status: 400, body: { ok: false, error: { code: "BAD_EVENT", message: "\u4E0D\u662F\u8FD9\u4E2A\u7248\u672C\u7684\u4E8B\u4EF6\u4FE1\u5C01" } } };
+  if (event.event.type !== "turn-finished") return { status: 200, body: { ok: true } };
+  const sessionId = event.event.session.id;
+  const binding = readBindings()[String(sessionId)];
+  if (!binding) return { status: 200, body: { ok: true, skipped: "\u672A\u7ED1\u5B9A\u5DE5\u4F5C\u9879" } };
+  const cfgRaw = await loadConfig(env) || {};
+  if (cfgRaw.autoBackfill === false) {
+    return { status: 200, body: { ok: true, skipped: "\u81EA\u52A8\u56DE\u586B\u5DF2\u5173\u95ED" } };
+  }
+  const content = event.content || {};
+  if (typeof content.reply !== "string") {
+    return { status: 200, body: { ok: true, skipped: "\u6CA1\u6709\u7B54\u590D\u5185\u5BB9" } };
+  }
+  const key = `${binding.workItemId}|${sessionId}|${event.event.at}`;
+  if (seen.has(key)) return { status: 200, body: { ok: true, dedup: true } };
+  seen.add(key);
+  let body = replyText(content.reply, content.replyTruncated);
+  if (body.trim().length > 4e3) {
+    body = body.slice(0, 4e3).trimEnd() + "\n\n\uFF08\u26A0 \u81EA\u52A8\u56DE\u586B\u53EA\u4FDD\u7559\u524D 4000 \u5B57\u7B26\uFF0C\u5168\u6587\u770B\u4F1A\u8BDD\uFF09";
+  }
+  try {
+    const comment = await addComment(
+      { baseUrl: cfgRaw.baseUrl, apiKey: cfgRaw.apiKey, workspace: cfgRaw.workspace, apiVersion: cfgRaw.apiVersion },
+      binding.projectId,
+      binding.workItemId,
+      body,
+      { sessionId }
+    );
+    return { status: 200, body: { ok: true, commentId: comment.id, workItemId: binding.workItemId } };
+  } catch (e) {
+    seen.delete(key);
+    const code = e.code || "PLANE_ERROR";
+    console.error(`[plane] \u81EA\u52A8\u56DE\u586B\u5931\u8D25 ${code}: ${e.message}`);
+    return { status: 200, body: { ok: true, error: { code, message: e.message } } };
+  }
+}
 
 // service/src/main.js
 var PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
@@ -3897,9 +3953,19 @@ var server = import_node_http.default.createServer(async (req, res) => {
       sendJson(res, 200, { ok: true, comment });
       return;
     }
+    if (req.method === "POST" && SESSION_EVENTS_ROUTE === path) {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const out = await handleSessionEvent(process.env, raw);
+      sendJson(res, out.status, out.body);
+      return;
+    }
     if (req.method === "POST" && path === "/session-start") {
       const body = await readBody(req);
       const out = await startSession(process.env, body);
+      if (body.workItemId) {
+        rememberBinding(out.sessionId, { workItemId: body.workItemId, projectId: state.selected ?? body.projectId });
+      }
       sendJson(res, 200, { ok: true, ...out });
       return;
     }
@@ -3915,6 +3981,7 @@ var server = import_node_http.default.createServer(async (req, res) => {
       const patch = { labels };
       if (body.stateId) patch.state = body.stateId;
       const item = await patchWorkItem(cfg, body.projectId, body.workItemId, patch);
+      rememberBinding(body.sessionId, { workItemId: body.workItemId, projectId: body.projectId });
       sendJson(res, 200, { ok: true, item, label });
       return;
     }

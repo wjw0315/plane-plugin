@@ -1,6 +1,6 @@
 {
   "name": "openchamber-plane",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Plane 任务看板 —— OpenChamber guest 扩展",
   "type": "module",
@@ -38,6 +38,12 @@
         "prompt"
       ],
       "sessionControl": {
+        "content": true
+      },
+      "sessionEvents": {
+        "events": [
+          "turn-finished"
+        ],
         "content": true
       }
     }

@@ -358,6 +358,63 @@ try {
   const deniedComment = await call("/comment", { method: "POST", body: { projectId: "p1", workItemId: "i1", body: "x" } });
   check("Plane 401 → AUTH_FAILED", deniedComment.status === 401 && deniedComment.body?.error?.code === "AUTH_FAILED");
 
+  /* ---------------- 08 片：自动回填（sessionEvents） ---------------- */
+
+  plane.mode = "ok";
+  function eventBody(at, reply, truncated = false) {
+    return JSON.stringify({
+      v: 1,
+      requestId: "evt-" + at,
+      event: {
+        id: "e" + at,
+        type: "turn-finished",
+        at,
+        session: { id: "ses_test", parentId: null },
+        project: { directory: "/tmp/xlm-scrm" },
+        linked: [{ id: "i1", kind: "issue", url: "http://x", provider: "plane", identifier: "XLMSC-12" }],
+      },
+      content: { type: "turn-finished", sessionTitle: "XLMSC-12 任务A", reply, replyTruncated: truncated },
+    });
+  }
+
+  const before08 = plane.comments.length;
+  const evt1 = await fetch(`http://127.0.0.1:${PORT}${"/session-events"}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: eventBody(1699999000001, "已补上两列。\n\n验证：3 个月样本通过。"),
+  });
+  const evt1Body = await evt1.json();
+  check("自动回填写了一条评论", evt1.status === 200 && evt1Body.ok === true && plane.comments.length === before08 + 1, JSON.stringify(evt1Body).slice(0, 200));
+  const autoHtml = plane.comments.at(-1)?.comment_html || "";
+  check(
+    "自动回填评论带来源会话与答复",
+    autoHtml.includes("ses_test") && autoHtml.includes("已补上两列"),
+    autoHtml.slice(0, 200),
+  );
+
+  await fetch(`http://127.0.0.1:${PORT}/session-events`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: eventBody(1699999000001, "重复投递的答复"),
+  });
+  check("同一事件重复投递不重复写", plane.comments.length === before08 + 1, `comments=${plane.comments.length}`);
+
+  const evt2 = await fetch(`http://127.0.0.1:${PORT}/session-events`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: eventBody(1699999000002, "第二轮的答复", true),
+  });
+  const evt2Body = await evt2.json();
+  check("第二轮答复也回填", evt2Body.ok === true && plane.comments.length === before08 + 2, JSON.stringify(evt2Body).slice(0, 160));
+  check("截断标记写进评论", /答复超过 64000 字符被截断/.test(plane.comments.at(-1)?.comment_html || ""));
+
+  const bad = await fetch(`http://127.0.0.1:${PORT}/session-events`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: "不是事件",
+  });
+  check("坏信封 → 400", bad.status === 400);
+
   plane.mode = "ok";
   const badUrl = await call("/config", {
     method: "POST",

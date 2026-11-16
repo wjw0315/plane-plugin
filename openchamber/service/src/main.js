@@ -22,7 +22,8 @@
 import http from "node:http";
 import { loadConfig, saveConfig, maskConfig } from "./config.js";
 import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, addComment, PlaneError } from "./plane.js";
-import { startSession } from "./session.js";
+import { startSession, rememberBinding } from "./session.js";
+import { handleSessionEvent, SESSION_EVENTS_ROUTE } from "./session-events.js";
 
 const PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
 const TOKEN = process.env.OPENCHAMBER_SERVICE_TOKEN || "";
@@ -170,9 +171,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && SESSION_EVENTS_ROUTE === path) {
+      // 宿主直投的会话事件（无窗口也推）。回包只有 ok/error，面板通过 panels.emit 收结果。
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const out = await handleSessionEvent(process.env, raw);
+      sendJson(res, out.status, out.body);
+      return;
+    }
+
     if (req.method === "POST" && path === "/session-start") {
       const body = await readBody(req);
       const out = await startSession(process.env, body);
+      if (body.workItemId) {
+        rememberBinding(out.sessionId, { workItemId: body.workItemId, projectId: state.selected ?? body.projectId });
+      }
       sendJson(res, 200, { ok: true, ...out });
       return;
     }
@@ -189,6 +202,7 @@ const server = http.createServer(async (req, res) => {
       const patch = { labels };
       if (body.stateId) patch.state = body.stateId;
       const item = await patchWorkItem(cfg, body.projectId, body.workItemId, patch);
+      rememberBinding(body.sessionId, { workItemId: body.workItemId, projectId: body.projectId });
       sendJson(res, 200, { ok: true, item, label });
       return;
     }
