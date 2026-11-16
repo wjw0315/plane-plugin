@@ -59,6 +59,12 @@
   .row .idf{font-size:10.5px;color:var(--fg3);font-variant-numeric:tabular-nums}
   footer{display:flex;align-items:center;gap:6px;padding:7px 12px;border-top:1px solid var(--line);
     font-size:11px;color:var(--fg3);background:var(--panel)}
+  .crash{margin:8px 12px 0;padding:6px 8px;border:1px solid #4a2326;background:#241618;color:#f87171;
+    border-radius:8px;font-size:11px;white-space:pre-wrap}
+  .diag{margin-top:12px;border-top:1px solid var(--line);padding-top:8px;color:var(--fg3);font-size:10.5px}
+  .diag summary{cursor:pointer;outline:none}
+  .diag div{margin-top:4px;word-break:break-word}
+  .diag ol{margin:4px 0 0;padding-left:16px}
 </style>
 </head>
 <body data-theme="dark">
@@ -69,11 +75,13 @@
     <select id="proj" hidden></select>
     <button id="refresh" type="button" title="重新拉取">↻</button>
   </header>
+  <div id="crash" class="crash" hidden></div>
   <main id="view"></main>
   <footer>
     <span>宿主</span><span id="hostState">—</span>
+    <span>· service</span><span id="svcState">—</span>
     <span class="grow"></span>
-    <span>配置存在扩展数据目录</span>
+    <span>配置在扩展数据目录</span>
   </footer>
   <script src="./main.js"></script>
 </body>

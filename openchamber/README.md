@@ -49,6 +49,7 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `service/src/main.js` | service 源码（Node） |
 | `service/main.cjs` | service 产物：esbuild 打的 CJS，**要提交**（`.js` 会被 `"type": "module"` 当成 ESM） |
 | `test/smoke.mjs` | 不依赖 OpenChamber 的冒烟测试（含假 Plane） |
+| `test/host-harness.html` | **假宿主**：把面板放进 iframe、按 SDK 协议应答，用来在浏览器里手动点面板（`python3 -m http.server` 起在本目录，开 `/test/host-harness.html`，用面板上方两个按钮填值 + 点保存） |
 
 ## service 路由
 

@@ -1582,6 +1582,7 @@
   var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 
   // panel/src/main.js
+  var BUILD = "0.2.1+diag";
   var host = connectHost();
   var $ = (id) => document.getElementById(id);
   var STORAGE_KEY = "plane.project";
@@ -1591,34 +1592,89 @@
     config: null,
     projects: [],
     selected: null,
-    error: null
+    error: null,
+    saveState: "",
+    // 保存按钮旁边的即时反馈
+    lastCall: null,
+    // { method, path, status, code, message }
+    calls: []
+    // 最近 8 次调用，诊断用
   };
-  async function callService(path, { method = "POST", body } = {}) {
-    const res = await host.serviceRequest({
-      method,
-      path,
-      body: body === void 0 ? void 0 : JSON.stringify(body)
+  function record(entry) {
+    state.lastCall = entry;
+    state.calls.unshift(entry);
+    state.calls = state.calls.slice(0, 8);
+    console.log(`[plane] ${entry.method} ${entry.path} \u2192 ${entry.status}${entry.code ? " " + entry.code : ""}`);
+  }
+  function paintCrash(text) {
+    const box = $("crash");
+    if (!box) return;
+    box.hidden = false;
+    box.textContent = text;
+  }
+  window.addEventListener("error", (e) => {
+    paintCrash(`\u9762\u677F\u811A\u672C\u51FA\u9519\uFF1A${e.message}`);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const r = e.reason;
+    paintCrash(`\u672A\u5904\u7406\u7684\u5F02\u6B65\u9519\u8BEF\uFF1A${r?.code ? r.code + "\uFF1A" : ""}${r?.message || String(r)}`);
+  });
+  var CALL_TIMEOUT_MS = 2e4;
+  function withTimeout(promise, ms, method, path) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const err = new Error(`\u5BBF\u4E3B ${ms / 1e3}s \u5185\u6CA1\u6709\u56DE\u8BDD\uFF08${method} ${path}\uFF09\uFF0Cservice \u53EF\u80FD\u8FD8\u6CA1\u8D77\u6765`);
+        err.code = "HOST_TIMEOUT";
+        reject(err);
+      }, ms);
+      promise.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        }
+      );
     });
-    let data = null;
+  }
+  async function callService(path, { method = "POST", body } = {}) {
+    const started = Date.now();
     try {
-      data = JSON.parse(res.body);
-    } catch {
+      const res = await withTimeout(host.serviceRequest({
+        method,
+        path,
+        body: body === void 0 ? void 0 : JSON.stringify(body)
+      }), CALL_TIMEOUT_MS, method, path);
+      let data = null;
+      try {
+        data = JSON.parse(res.body);
+      } catch {
+      }
+      if (res.status >= 400 || !data || data.ok === false) {
+        const info = data?.error || { code: "UNKNOWN", message: `service \u8FD4\u56DE ${res.status}` };
+        record({ method, path, status: res.status, code: info.code, message: info.message, ms: Date.now() - started });
+        const err = new Error(info.message || "\u672A\u77E5\u9519\u8BEF");
+        err.code = info.code || "UNKNOWN";
+        err.missing = info.missing;
+        throw err;
+      }
+      record({ method, path, status: res.status, code: "", message: "", ms: Date.now() - started });
+      return data;
+    } catch (e) {
+      if (!e.status) {
+        record({ method, path, status: 0, code: e.code || "HOST_ERROR", message: e.message || String(e), ms: Date.now() - started });
+      }
+      throw e;
     }
-    if (res.status >= 400 || !data || data.ok === false) {
-      const info = data?.error || { code: "UNKNOWN", message: `service \u8FD4\u56DE ${res.status}` };
-      const err = new Error(info.message || "\u672A\u77E5\u9519\u8BEF");
-      err.code = info.code || "UNKNOWN";
-      err.missing = info.missing;
-      throw err;
-    }
-    return data;
   }
   async function boot() {
     setPhase("boot");
     try {
       const { config } = await callService("/config", { method: "GET" });
       state.config = config;
-      rememberProject(await readStoredProject());
+      state.selected = await readStoredProject();
       if (!config.configured) return setPhase("setup");
       await loadProjects();
     } catch (e) {
@@ -1640,36 +1696,43 @@
       fail(e);
     }
   }
-  async function saveConfig(form) {
+  async function saveConfig(fields) {
+    state.saveState = "\u4FDD\u5B58\u4E2D\u2026";
+    state.error = null;
+    render();
     try {
       const { config } = await callService("/config", {
         body: {
-          baseUrl: form.baseUrl.value,
-          apiKey: form.apiKey.value,
-          workspace: form.workspace.value,
-          apiVersion: form.apiVersion.value
+          baseUrl: fields.baseUrl,
+          apiKey: fields.apiKey,
+          workspace: fields.workspace,
+          apiVersion: fields.apiVersion
         }
       });
       state.config = config;
-      state.error = null;
       if (!config.configured) {
-        state.error = { code: "CONFIG_MISSING", message: "\u8FD8\u7F3A\u5B57\u6BB5\uFF0C\u4E09\u4E2A\u5FC5\u586B\u90FD\u8981\u586B" };
+        state.saveState = "";
+        state.error = { code: "CONFIG_MISSING", message: "\u4E09\u4E2A\u5FC5\u586B\u90FD\u586B\u4E0A\u518D\u4FDD\u5B58" };
         return setPhase("setup");
       }
+      state.saveState = "\u5DF2\u4FDD\u5B58\uFF0C\u6B63\u5728\u62C9\u9879\u76EE\u2026";
       await loadProjects();
+      state.saveState = "";
     } catch (e) {
+      state.saveState = "";
       fail(e);
     }
   }
   function fail(e) {
-    state.error = { code: e.code || "UNKNOWN", message: e.message };
+    state.error = { code: e.code || "UNKNOWN", message: e.message || String(e) };
     if (e.code === "CONFIG_MISSING" || e.code === "BAD_CONFIG") setPhase("setup");
     else setPhase("error");
   }
   async function readStoredProject() {
     try {
       const got = await host.storage.get(STORAGE_KEY);
-      return typeof got === "string" ? got : got?.value ?? null;
+      if (typeof got === "string") return got;
+      return got?.value ?? null;
     } catch {
       return null;
     }
@@ -1680,21 +1743,28 @@
     } catch {
     }
   }
-  function rememberProject(id) {
-    if (id) state.selected = id;
-  }
   function setPhase(phase) {
     state.phase = phase;
     render();
   }
   var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function diagnostics() {
+    const last = state.lastCall;
+    return `<details class="diag"><summary>\u8BCA\u65AD\uFF08${ESC(BUILD)}\uFF09</summary>
+    <div>\u5BBF\u4E3B\uFF1A${ESC($("hostState").textContent || "\u2014")} \xB7 service\uFF1A${ESC($("svcState")?.textContent || "\u2014")}</div>
+    <div>\u6700\u8FD1\u8C03\u7528\uFF1A${last ? `${ESC(last.method)} ${ESC(last.path)} \u2192 ${last.status} ${ESC(last.code || "")}${last.ms ? ` (${last.ms}ms)` : ""}` : "\u65E0"}</div>
+    ${last?.message ? `<div>\u6D88\u606F\uFF1A${ESC(last.message)}</div>` : ""}
+    <ol>${state.calls.slice(1, 5).map((c) => `<li>${ESC(c.method)} ${ESC(c.path)} \u2192 ${c.status} ${ESC(c.code || "")}</li>`).join("")}</ol>
+  </details>`;
+  }
   function render() {
-    $("dot").className = state.phase === "list" || state.phase === "empty" ? "dot on" : "dot";
+    const healthy = state.phase === "list" || state.phase === "empty";
+    $("dot").className = healthy ? "dot on" : "dot";
     $("hostState").textContent = state.phase === "nohost" ? "\u672A\u8FDE\u63A5" : "\u5DF2\u8FDE\u63A5";
     const proj = $("proj");
     proj.hidden = state.phase !== "list";
     proj.innerHTML = state.projects.map((p) => `<option value="${ESC(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC(p.name)}</option>`).join("");
-    $("view").innerHTML = viewFor(state.phase);
+    $("view").innerHTML = viewFor(state.phase) + diagnostics();
     wire();
   }
   function viewFor(phase) {
@@ -1717,18 +1787,19 @@
       <label>API \u7248\u672C<input name="apiVersion" list="versions" placeholder="v1 \u6216 v2" value="${ESC(c.apiVersion || "v2")}">
         <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
       <button type="submit">\u4FDD\u5B58\u5E76\u8FDE\u63A5</button>
+      <div class="fine" id="saveState">${ESC(state.saveState)}</div>
       <div class="fine">Key \u5B58\u5728\u6269\u5C55\u81EA\u5DF1\u7684\u6570\u636E\u76EE\u5F55\uFF08600 \u6743\u9650\uFF09\uFF0C\u9762\u677F\u53EA\u62FF\u5230\u8131\u654F\u89C6\u56FE\u3002</div>
     </form>`;
     }
     if (phase === "error") {
-      const retry = err?.code === "NETWORK" ? `<button data-act="retry">\u91CD\u8BD5</button>` : "";
+      const retry = err?.code === "NETWORK" || err?.code === "RATE_LIMITED" ? `<button data-act="retry">\u91CD\u8BD5</button>` : "";
       return `<div class="empty"><div class="t">\u8FDE\u4E0D\u4E0A Plane</div>
       <div class="err">${ESC(err?.code || "")}\uFF1A${ESC(err?.message || "")}</div>
-      <div class="acts">${retry}<button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
+      <div class="acts">${retry}<button data-act="setup">\u6539\u914D\u7F6E</button><button data-act="retry">\u518D\u8BD5\u4E00\u6B21</button></div></div>`;
     }
     if (phase === "empty") {
       return `<div class="empty"><div class="t">\u8FD9\u4E2A workspace \u8FD8\u6CA1\u6709\u9879\u76EE</div>
-      <div>\u53BB Plane \u91CC\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u6216\u8005\u5728\u4E0A\u9762\u7684\u4E0B\u62C9\u91CC\u6362 workspace \u5BF9\u5E94\u914D\u7F6E\u3002</div>
+      <div>\u53BB Plane \u91CC\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u6216\u8005\u6539\u914D\u7F6E\u6362 workspace\u3002</div>
       <div class="acts"><button data-act="retry">\u5237\u65B0</button><button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
     }
     const current = state.projects.find((p) => p.id === state.selected);
@@ -1745,19 +1816,24 @@
     if (form) {
       form.addEventListener("submit", (e) => {
         e.preventDefault();
+        const btn = form.querySelector("button[type=submit]");
+        if (btn?.disabled) return;
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "\u4FDD\u5B58\u4E2D\u2026";
+        }
         saveConfig({
-          baseUrl: form.baseUrl,
-          apiKey: form.apiKey,
-          workspace: form.workspace,
-          apiVersion: form.apiVersion
+          baseUrl: form.baseUrl.value,
+          apiKey: form.apiKey.value,
+          workspace: form.workspace.value,
+          apiVersion: form.apiVersion.value
         });
       });
     }
     document.querySelectorAll("[data-act]").forEach((el) => {
       el.addEventListener("click", () => {
-        const act = el.dataset.act;
-        if (act === "retry") return loadProjects();
-        if (act === "setup") return setPhase("setup");
+        if (el.dataset.act === "retry") return loadProjects();
+        if (el.dataset.act === "setup") return setPhase("setup");
       });
     });
     document.querySelectorAll("[data-pick]").forEach((el) => {
@@ -1778,9 +1854,23 @@
   host.onReady((ctx) => {
     ready = true;
     document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
+    render();
     boot();
   });
+  host.onConnection?.((c) => {
+    $("hostState").textContent = c?.connected === false ? "\u8FDE\u63A5\u4E2D\u65AD" : "\u5DF2\u8FDE\u63A5";
+  });
+  async function refreshServiceState() {
+    try {
+      const status = await host.serviceStatus();
+      const label = { ready: "\u5C31\u7EEA", starting: "\u542F\u52A8\u4E2D", stopped: "\u672A\u542F\u52A8", failed: "\u542F\u52A8\u5931\u8D25" }[status?.status ?? status] || String(status?.status ?? status);
+      $("svcState").textContent = label;
+    } catch {
+      $("svcState").textContent = "\u4E0D\u53EF\u7528";
+    }
+  }
   setTimeout(() => {
     if (!ready) setPhase("nohost");
   }, 1500);
+  refreshServiceState();
 })();

@@ -1,11 +1,13 @@
 /**
  * Plane 扩展的面板（OpenChamber 沙箱 iframe）。
  *
- * 02 片：配置表单（落在 service 的数据目录）+ 列项目 + 三种错误面 + 记住项目。
- * 看板在 03 片。
+ * 02 片：配置表单 → 列项目 → 三种错误面 → 记住项目。
+ * 这一版加上了「看得见的过程」：每次调用都记下方法/路径/状态/错误码，
+ * 保存按钮点下去立刻有反馈，异常也会画到界面上（不再只是控制台里一声不响）。
  */
 import { connectHost } from "@openchamber/sdk";
 
+const BUILD = "0.2.1+diag";
 const host = connectHost();
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = "plane.project";
@@ -16,30 +18,84 @@ const state = {
   projects: [],
   selected: null,
   error: null,
+  saveState: "", // 保存按钮旁边的即时反馈
+  lastCall: null, // { method, path, status, code, message }
+  calls: [], // 最近 8 次调用，诊断用
 };
+
+/* ---------------- 诊断 ---------------- */
+
+function record(entry) {
+  state.lastCall = entry;
+  state.calls.unshift(entry);
+  state.calls = state.calls.slice(0, 8);
+  console.log(`[plane] ${entry.method} ${entry.path} → ${entry.status}${entry.code ? " " + entry.code : ""}`);
+}
+
+function paintCrash(text) {
+  const box = $("crash");
+  if (!box) return;
+  box.hidden = false;
+  box.textContent = text;
+}
+
+window.addEventListener("error", (e) => {
+  paintCrash(`面板脚本出错：${e.message}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  paintCrash(`未处理的异步错误：${r?.code ? r.code + "：" : ""}${r?.message || String(r)}`);
+});
 
 /* ---------------- service 调用 ---------------- */
 
-async function callService(path, { method = "POST", body } = {}) {
-  const res = await host.serviceRequest({
-    method,
-    path,
-    body: body === undefined ? undefined : JSON.stringify(body),
+const CALL_TIMEOUT_MS = 20000;
+
+function withTimeout(promise, ms, method, path) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`宿主 ${ms / 1000}s 内没有回话（${method} ${path}），service 可能还没起来`);
+      err.code = "HOST_TIMEOUT";
+      reject(err);
+    }, ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
   });
-  let data = null;
+}
+
+async function callService(path, { method = "POST", body } = {}) {
+  const started = Date.now();
   try {
-    data = JSON.parse(res.body);
-  } catch {
-    /* 非 JSON 就当空响应 */
+    const res = await withTimeout(host.serviceRequest({
+      method,
+      path,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }), CALL_TIMEOUT_MS, method, path);
+    let data = null;
+    try {
+      data = JSON.parse(res.body);
+    } catch {
+      /* 空响应 */
+    }
+    if (res.status >= 400 || !data || data.ok === false) {
+      const info = data?.error || { code: "UNKNOWN", message: `service 返回 ${res.status}` };
+      record({ method, path, status: res.status, code: info.code, message: info.message, ms: Date.now() - started });
+      const err = new Error(info.message || "未知错误");
+      err.code = info.code || "UNKNOWN";
+      err.missing = info.missing;
+      throw err;
+    }
+    record({ method, path, status: res.status, code: "", message: "", ms: Date.now() - started });
+    return data;
+  } catch (e) {
+    if (!e.status) {
+      // 没到 service：宿主的拒绝或超时（HostRequestError 带 code）
+      record({ method, path, status: 0, code: e.code || "HOST_ERROR", message: e.message || String(e), ms: Date.now() - started });
+    }
+    throw e;
   }
-  if (res.status >= 400 || !data || data.ok === false) {
-    const info = data?.error || { code: "UNKNOWN", message: `service 返回 ${res.status}` };
-    const err = new Error(info.message || "未知错误");
-    err.code = info.code || "UNKNOWN";
-    err.missing = info.missing;
-    throw err;
-  }
-  return data;
 }
 
 /* ---------------- 流程 ---------------- */
@@ -49,7 +105,7 @@ async function boot() {
   try {
     const { config } = await callService("/config", { method: "GET" });
     state.config = config;
-    rememberProject(await readStoredProject());
+    state.selected = await readStoredProject();
     if (!config.configured) return setPhase("setup");
     await loadProjects();
   } catch (e) {
@@ -73,41 +129,47 @@ async function loadProjects() {
   }
 }
 
-async function saveConfig(form) {
+async function saveConfig(fields) {
+  state.saveState = "保存中…";
+  state.error = null;
+  render();
   try {
     const { config } = await callService("/config", {
       body: {
-        baseUrl: form.baseUrl.value,
-        apiKey: form.apiKey.value,
-        workspace: form.workspace.value,
-        apiVersion: form.apiVersion.value,
+        baseUrl: fields.baseUrl,
+        apiKey: fields.apiKey,
+        workspace: fields.workspace,
+        apiVersion: fields.apiVersion,
       },
     });
     state.config = config;
-    state.error = null;
     if (!config.configured) {
-      state.error = { code: "CONFIG_MISSING", message: "还缺字段，三个必填都要填" };
+      state.saveState = "";
+      state.error = { code: "CONFIG_MISSING", message: "三个必填都填上再保存" };
       return setPhase("setup");
     }
+    state.saveState = "已保存，正在拉项目…";
     await loadProjects();
+    state.saveState = "";
   } catch (e) {
+    state.saveState = "";
     fail(e);
   }
 }
 
 function fail(e) {
-  state.error = { code: e.code || "UNKNOWN", message: e.message };
-  // 配置类错误直接回表单，其它留在错误面
+  state.error = { code: e.code || "UNKNOWN", message: e.message || String(e) };
   if (e.code === "CONFIG_MISSING" || e.code === "BAD_CONFIG") setPhase("setup");
   else setPhase("error");
 }
 
-/* ---------------- 记住项目（非敏感，放宿主 storage） ---------------- */
+/* ---------------- 记住项目 ---------------- */
 
 async function readStoredProject() {
   try {
     const got = await host.storage.get(STORAGE_KEY);
-    return typeof got === "string" ? got : got?.value ?? null;
+    if (typeof got === "string") return got;
+    return got?.value ?? null;
   } catch {
     return null;
   }
@@ -116,11 +178,8 @@ async function storeProject(id) {
   try {
     await host.storage.set(STORAGE_KEY, id);
   } catch {
-    /* 存不了不影响使用 */
+    /* 存不了不影响用 */
   }
-}
-function rememberProject(id) {
-  if (id) state.selected = id;
 }
 
 /* ---------------- 渲染 ---------------- */
@@ -133,8 +192,19 @@ function setPhase(phase) {
 const ESC = (v) =>
   String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+function diagnostics() {
+  const last = state.lastCall;
+  return `<details class="diag"><summary>诊断（${ESC(BUILD)}）</summary>
+    <div>宿主：${ESC($("hostState").textContent || "—")} · service：${ESC($("svcState")?.textContent || "—")}</div>
+    <div>最近调用：${last ? `${ESC(last.method)} ${ESC(last.path)} → ${last.status} ${ESC(last.code || "")}${last.ms ? ` (${last.ms}ms)` : ""}` : "无"}</div>
+    ${last?.message ? `<div>消息：${ESC(last.message)}</div>` : ""}
+    <ol>${state.calls.slice(1, 5).map((c) => `<li>${ESC(c.method)} ${ESC(c.path)} → ${c.status} ${ESC(c.code || "")}</li>`).join("")}</ol>
+  </details>`;
+}
+
 function render() {
-  $("dot").className = state.phase === "list" || state.phase === "empty" ? "dot on" : "dot";
+  const healthy = state.phase === "list" || state.phase === "empty";
+  $("dot").className = healthy ? "dot on" : "dot";
   $("hostState").textContent = state.phase === "nohost" ? "未连接" : "已连接";
 
   const proj = $("proj");
@@ -143,7 +213,7 @@ function render() {
     .map((p) => `<option value="${ESC(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC(p.name)}</option>`)
     .join("");
 
-  $("view").innerHTML = viewFor(state.phase);
+  $("view").innerHTML = viewFor(state.phase) + diagnostics();
   wire();
 }
 
@@ -170,24 +240,24 @@ function viewFor(phase) {
       <label>API 版本<input name="apiVersion" list="versions" placeholder="v1 或 v2" value="${ESC(c.apiVersion || "v2")}">
         <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
       <button type="submit">保存并连接</button>
+      <div class="fine" id="saveState">${ESC(state.saveState)}</div>
       <div class="fine">Key 存在扩展自己的数据目录（600 权限），面板只拿到脱敏视图。</div>
     </form>`;
   }
 
   if (phase === "error") {
-    const retry = err?.code === "NETWORK" ? `<button data-act="retry">重试</button>` : "";
+    const retry = err?.code === "NETWORK" || err?.code === "RATE_LIMITED" ? `<button data-act="retry">重试</button>` : "";
     return `<div class="empty"><div class="t">连不上 Plane</div>
       <div class="err">${ESC(err?.code || "")}：${ESC(err?.message || "")}</div>
-      <div class="acts">${retry}<button data-act="setup">改配置</button></div></div>`;
+      <div class="acts">${retry}<button data-act="setup">改配置</button><button data-act="retry">再试一次</button></div></div>`;
   }
 
   if (phase === "empty") {
     return `<div class="empty"><div class="t">这个 workspace 还没有项目</div>
-      <div>去 Plane 里建一个项目，或者在上面的下拉里换 workspace 对应配置。</div>
+      <div>去 Plane 里建一个项目，或者改配置换 workspace。</div>
       <div class="acts"><button data-act="retry">刷新</button><button data-act="setup">改配置</button></div></div>`;
   }
 
-  // list
   const current = state.projects.find((p) => p.id === state.selected);
   return `<div class="list">${state.projects
     .map(
@@ -207,20 +277,25 @@ function wire() {
   if (form) {
     form.addEventListener("submit", (e) => {
       e.preventDefault();
+      const btn = form.querySelector("button[type=submit]");
+      if (btn?.disabled) return;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "保存中…";
+      }
       saveConfig({
-        baseUrl: form.baseUrl,
-        apiKey: form.apiKey,
-        workspace: form.workspace,
-        apiVersion: form.apiVersion,
+        baseUrl: form.baseUrl.value,
+        apiKey: form.apiKey.value,
+        workspace: form.workspace.value,
+        apiVersion: form.apiVersion.value,
       });
     });
   }
 
   document.querySelectorAll("[data-act]").forEach((el) => {
     el.addEventListener("click", () => {
-      const act = el.dataset.act;
-      if (act === "retry") return loadProjects();
-      if (act === "setup") return setPhase("setup");
+      if (el.dataset.act === "retry") return loadProjects();
+      if (el.dataset.act === "setup") return setPhase("setup");
     });
   });
 
@@ -246,9 +321,25 @@ let ready = false;
 host.onReady((ctx) => {
   ready = true;
   document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
+  render(); // 先把宿主状态画出来，再加载
   boot();
 });
+
+host.onConnection?.((c) => {
+  $("hostState").textContent = c?.connected === false ? "连接中断" : "已连接";
+});
+
+async function refreshServiceState() {
+  try {
+    const status = await host.serviceStatus();
+    const label = { ready: "就绪", starting: "启动中", stopped: "未启动", failed: "启动失败" }[status?.status ?? status] || String(status?.status ?? status);
+    $("svcState").textContent = label;
+  } catch {
+    $("svcState").textContent = "不可用";
+  }
+}
 
 setTimeout(() => {
   if (!ready) setPhase("nohost");
 }, 1500);
+refreshServiceState();
