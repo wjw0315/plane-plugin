@@ -14,7 +14,7 @@ const PRIO = {
 const ESC = (v) =>
   String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-export function boardHTML({ states, items, detailId }) {
+export function boardHTML({ states, items, detailId, canDrag = true }) {
   if (!states.length) {
     return `<div class="empty"><div class="t">这个项目还没有状态</div>
       <div>去 Plane 里给项目配一套状态（Backlog / Todo / …），看板列会跟着变。</div></div>`;
@@ -24,7 +24,7 @@ export function boardHTML({ states, items, detailId }) {
       const list = items.filter((i) => i.stateId === s.id);
       return `<section class="col" data-state-id="${ESC(s.id)}">
         <h2><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></h2>
-        <div class="drop">${list.map((i) => cardHTML(i, true, detailId)).join("") || '<div class="blank">拖到这里</div>'}</div>
+        <div class="drop">${list.map((i) => cardHTML(i, canDrag, detailId)).join("") || (canDrag ? '<div class="blank">拖到这里</div>' : "")}</div>
       </section>`;
     })
     .join("");
@@ -33,7 +33,7 @@ export function boardHTML({ states, items, detailId }) {
 
 /** 列表视图：纵向分组、可折叠，每张卡带「移动到」下拉。 */
 export function listHTML({ states, items, detailId }) {
-  if (!states.length) return boardHTML({ states, items, detailId });
+  if (!states.length) return boardHTML({ states, items, detailId, canDrag: false });
   return states
     .map((s) => {
       const list = items.filter((i) => i.stateId === s.id);
@@ -70,13 +70,13 @@ function cardHTML(item, draggable, detailId) {
       ${initial ? `<span class="avatar">${ESC(initial)}</span>` : ""}
       <span class="grow"></span>
       ${item.concl ? `<span class="chip ok" title="已回填结论">✓ 结论</span>` : ""}
-      ${item.sess ? `<span class="chip sess">⌘ 会话</span>` : ""}
+      ${item.sess ? `<span class="chip sess" data-open-session="${ESC(item.sess)}" title="跳到这个会话">⌘ 会话</span>` : ""}
     </div>
   </article>`;
 }
 
 /** 接上拖拽和点击：拖到哪一列调 onMove，点卡片调 onOpen。 */
-export function wireBoard(root, { onMove, onOpen }) {
+export function wireBoard(root, { onMove, onOpen, onOpenSession }) {
   let dragging = null;
 
   root.querySelectorAll(".card[draggable]").forEach((el) => {
@@ -96,6 +96,13 @@ export function wireBoard(root, { onMove, onOpen }) {
       el.classList.remove("dragging");
       root.querySelectorAll(".col.over").forEach((c) => c.classList.remove("over"));
     });
+    const sessChip = el.querySelector("[data-open-session]");
+    if (sessChip) {
+      sessChip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onOpenSession?.(sessChip.dataset.openSession);
+      });
+    }
   });
 
   root.querySelectorAll(".col").forEach((col) => {
@@ -117,9 +124,15 @@ export function wireBoard(root, { onMove, onOpen }) {
 }
 
 /** 列表视图的交互：点卡片开详情，下拉改状态。 */
-export function wireList(root, { onMove, onOpen }) {
+export function wireList(root, { onMove, onOpen, onOpenSession }) {
   root.querySelectorAll(".card").forEach((el) => {
     el.addEventListener("click", () => onOpen(el.dataset.id));
+  });
+  root.querySelectorAll("[data-open-session]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onOpenSession?.(el.dataset.openSession);
+    });
   });
   root.querySelectorAll("[data-move]").forEach((sel) => {
     sel.addEventListener("click", (e) => e.stopPropagation());

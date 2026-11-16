@@ -139,6 +139,18 @@
   .diag summary{cursor:pointer;outline:none}
   .diag div{margin-top:4px;word-break:break-word}
   .diag ol{margin:4px 0 0;padding-left:16px}
+
+  /* 手机（宿主 ready.device 报 phone/coarse 指针）：触控目标放大、头部换行、卡片不再显示拖拽手势 */
+  body[data-device=phone] header{flex-wrap:wrap;row-gap:6px}
+  body[data-device=phone] header select{max-width:150px}
+  body[data-device=phone] .card{cursor:pointer}
+  body[data-device=phone] .row{min-height:44px}
+  body[data-device=phone] header button,body[data-device=phone] .seg button{min-height:32px;padding:4px 10px}
+  body[data-device=phone] .acts button,body[data-device=phone] .acts .btn,
+  body[data-device=phone] .form button,body[data-device=phone] .stbtn{min-height:36px;padding:6px 12px}
+  body[data-device=phone] .fld select,body[data-device=phone] .fld input,body[data-device=phone] textarea{min-height:40px}
+  body[data-device=phone] .moveto select{min-height:36px}
+  body[data-device=phone] .col{flex:0 0 148px}
 </style>
 </head>
 <body data-theme="dark">

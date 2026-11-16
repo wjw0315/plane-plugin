@@ -14,6 +14,10 @@ const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = "plane.project";
 const VIEW_KEY = "plane.view";
 
+/** 宿主给的设备信息（ready.device）：formFactor = phone | tablet | desktop，pointer = coarse | fine。 */
+const device = { formFactor: "desktop", pointer: "fine" };
+const isPhone = () => device.formFactor === "phone" || device.pointer === "coarse";
+
 const state = {
   phase: "boot", // boot | nohost | setup | loading | list | empty | error
   config: null,
@@ -23,6 +27,7 @@ const state = {
   view: "board", // board | list
   detail: null, // { id, item, description, loading, error }
   drawer: null, // 发起会话参数抽屉
+  bindSheet: null, // 会话菜单动作带来的绑定 { sessionId, sessionTitle }
   toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
@@ -113,7 +118,8 @@ async function boot() {
     const { config } = await callService("/config", { method: "GET" });
     state.config = config;
     state.selected = await readStoredProject();
-    state.view = (await readStoredView()) === "list" ? "list" : "board";
+    // 手机上没有 HTML5 拖拽，默认给列表视图（列表用「移动到」下拉改状态）
+    state.view = isPhone() ? "list" : (await readStoredView()) === "list" ? "list" : "board";
     if (!config.configured) return setPhase("setup");
     await loadProjects();
   } catch (e) {
@@ -214,6 +220,15 @@ function closeDetail() {
 }
 
 /** 用 Plane 网页打开这张卡。 */
+/** 跳到 OpenChamber 会话（卡片 ⌘ 角标 / 详情里的会话 chip）。 */
+function openSessionById(sessionId) {
+  if (!sessionId) return;
+  host
+    .openSession(sessionId)
+    .then(() => showToast("已跳到会话"))
+    .catch(() => showToast("跳转失败", null, null, true));
+}
+
 function itemUrl(item) {
   const base = (state.config?.baseUrl || "").replace(/\/+$/, "");
   const ws = state.config?.workspace || "";
@@ -404,8 +419,13 @@ function viewFor(phase) {
     const base =
       state.view === "list"
         ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "")
-        : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
-    return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "");
+        : boardHTML({ ...state.board, detailId, canDrag: !isPhone() }) + (state.detail ? overlayDetailHTML() : "");
+    return (
+      base +
+      (state.drawer ? drawerHTML() : "") +
+      (state.concl ? conclHTML() : "") +
+      (state.bindSheet ? bindSheetHTML() : "")
+    );
   }
 
   return "";
@@ -440,7 +460,7 @@ function detailBody(item) {
     <div class="frow"><span class="k">标签</span><span>${item.labels?.length ? item.labels.length + " 个" : "无"}</span></div>
     <div class="frow"><span class="k">会话</span>${
       item.sess
-        ? `<span class="chip sess">⌘ ${ESC(item.sess)}</span>`
+        ? `<span class="chip sess" data-open-session="${ESC(item.sess)}">⌘ ${ESC(item.sess)} · 跳转</span>`
         : `<button class="btn" data-start-session="${ESC(item.id)}">发起会话</button>`
     }</div>
     <div class="sec"><h4>结论</h4>${
@@ -723,7 +743,7 @@ function wire() {
   });
 
   if (state.phase === "board") {
-    const handlers = { onMove: moveItem, onOpen: openDetail };
+    const handlers = { onMove: moveItem, onOpen: openDetail, onOpenSession: openSessionById };
     if (state.view === "list") wireList($("view"), handlers);
     else wireBoard($("view"), handlers);
   }
@@ -739,6 +759,38 @@ function wire() {
   });
   document.querySelectorAll("[data-backfill]").forEach((el) => {
     el.addEventListener("click", () => openConcl(el.dataset.backfill));
+  });
+  document.querySelectorAll("[data-bind-to]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const b = state.bindSheet;
+      const item = state.board.items.find((i) => i.id === el.dataset.bindTo);
+      if (!b || !item || b.busy) return;
+      b.busy = true;
+      render();
+      try {
+        await callService("/bind-session", {
+          body: { projectId: state.selected, workItemId: item.id, sessionId: b.sessionId },
+        });
+        item.sess = b.sessionId;
+        state.bindSheet = null;
+        render();
+        showToast("已绑定，会话结论会自动回填");
+      } catch (e2) {
+        b.busy = false;
+        showToast(`绑定失败：${e2.code || ""} ${e2.message || ""}`, null, null, true);
+      }
+    });
+  });
+  document.querySelectorAll("[data-bind-close]").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.bindSheet = null;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-open-session]").forEach((el) => {
+    el.addEventListener("click", () => {
+      host.openSession(el.dataset.openSession).catch(() => showToast("跳转失败", null, null, true));
+    });
   });
   document.querySelectorAll("[data-concl-close]").forEach((el) => {
     el.addEventListener("click", () => closeConcl());
@@ -826,6 +878,12 @@ function wire() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.bindSheet) {
+    e.preventDefault();
+    state.bindSheet = null;
+    render();
+    return;
+  }
   if (e.key === "Escape" && state.concl) {
     e.preventDefault();
     closeConcl();
@@ -842,6 +900,40 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/** 宿主回调：/plane 命令、聊天里的编号 chip、会话菜单动作。 */
+function handleHostCallbacks() {
+  host.onResolve(async (req) => {
+    const args = String(req.args || "").trim();
+    const m2 = args.match(/^([A-Za-z]+)-(\d+)$/);
+    if (!m2) return null;
+    const card = state.board.items.find((i) => i.identifier === m2[2]);
+    if (!card) return null;
+    return {
+      providerId: "plane",
+      id: card.id,
+      title: `XLMSC-${card.identifier} ${card.name}`,
+      url: itemUrl(card),
+      kind: "issue",
+      data: { workItemId: card.id },
+    };
+  });
+
+  host.onItem((item) => {
+    if (!item) return;
+    if (item.kind === "link") {
+      const seq = String(item.identifier || "").replace(/^.*-/, "");
+      const card = state.board.items.find((i) => i.identifier === seq);
+      if (card) return openDetail(card.id);
+      showToast(`找不到 ${item.identifier}，刷新看板试试`, null, null, true);
+      return;
+    }
+    if (item.kind === "session") {
+      state.bindSheet = { sessionId: item.sessionId, sessionTitle: item.sessionTitle };
+      render();
+    }
+  });
+}
+
 $("proj").addEventListener("change", async (e) => {
   state.selected = e.target.value;
   await storeProject(state.selected);
@@ -852,12 +944,21 @@ $("refresh").addEventListener("click", () => (state.phase === "board" ? loadBoar
 /* ---------------- 启动 ---------------- */
 
 let ready = false;
+let booted = false;
 host.onReady((ctx) => {
   ready = true;
   document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
+  if (ctx?.device) {
+    Object.assign(device, ctx.device);
+    document.body.dataset.device = device.formFactor;
+  }
   render(); // 先把宿主状态画出来，再加载
-  refreshServiceState();
-  boot();
+  if (!booted) {
+    booted = true; // 宿主会多次推 ready（iframe 加载 + 每次 hello），业务只初始化一次
+    refreshServiceState();
+    handleHostCallbacks();
+    boot();
+  }
 });
 
 host.onConnection?.((c) => {

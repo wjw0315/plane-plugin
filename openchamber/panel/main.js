@@ -1590,7 +1590,7 @@
     none: { label: "", cls: "" }
   };
   var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  function boardHTML({ states, items, detailId }) {
+  function boardHTML({ states, items, detailId, canDrag = true }) {
     if (!states.length) {
       return `<div class="empty"><div class="t">\u8FD9\u4E2A\u9879\u76EE\u8FD8\u6CA1\u6709\u72B6\u6001</div>
       <div>\u53BB Plane \u91CC\u7ED9\u9879\u76EE\u914D\u4E00\u5957\u72B6\u6001\uFF08Backlog / Todo / \u2026\uFF09\uFF0C\u770B\u677F\u5217\u4F1A\u8DDF\u7740\u53D8\u3002</div></div>`;
@@ -1599,13 +1599,13 @@
       const list = items.filter((i) => i.stateId === s.id);
       return `<section class="col" data-state-id="${ESC(s.id)}">
         <h2><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></h2>
-        <div class="drop">${list.map((i) => cardHTML(i, true, detailId)).join("") || '<div class="blank">\u62D6\u5230\u8FD9\u91CC</div>'}</div>
+        <div class="drop">${list.map((i) => cardHTML(i, canDrag, detailId)).join("") || (canDrag ? '<div class="blank">\u62D6\u5230\u8FD9\u91CC</div>' : "")}</div>
       </section>`;
     }).join("");
     return `<div class="board">${columns}</div>`;
   }
   function listHTML({ states, items, detailId }) {
-    if (!states.length) return boardHTML({ states, items, detailId });
+    if (!states.length) return boardHTML({ states, items, detailId, canDrag: false });
     return states.map((s) => {
       const list = items.filter((i) => i.stateId === s.id);
       const body = list.length ? list.map((it) => cardHTML(it, false, detailId) + (detailId === it.id ? "" : moveHTML(it, states))).join("") : '<div class="blank">\u8FD9\u4E2A\u72B6\u6001\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u9879</div>';
@@ -1632,11 +1632,11 @@
       ${initial ? `<span class="avatar">${ESC(initial)}</span>` : ""}
       <span class="grow"></span>
       ${item.concl ? `<span class="chip ok" title="\u5DF2\u56DE\u586B\u7ED3\u8BBA">\u2713 \u7ED3\u8BBA</span>` : ""}
-      ${item.sess ? `<span class="chip sess">\u2318 \u4F1A\u8BDD</span>` : ""}
+      ${item.sess ? `<span class="chip sess" data-open-session="${ESC(item.sess)}" title="\u8DF3\u5230\u8FD9\u4E2A\u4F1A\u8BDD">\u2318 \u4F1A\u8BDD</span>` : ""}
     </div>
   </article>`;
   }
-  function wireBoard(root, { onMove, onOpen }) {
+  function wireBoard(root, { onMove, onOpen, onOpenSession }) {
     let dragging = null;
     root.querySelectorAll(".card[draggable]").forEach((el) => {
       el.addEventListener("click", () => onOpen(el.dataset.id));
@@ -1654,6 +1654,13 @@
         el.classList.remove("dragging");
         root.querySelectorAll(".col.over").forEach((c) => c.classList.remove("over"));
       });
+      const sessChip = el.querySelector("[data-open-session]");
+      if (sessChip) {
+        sessChip.addEventListener("click", (e) => {
+          e.stopPropagation();
+          onOpenSession?.(sessChip.dataset.openSession);
+        });
+      }
     });
     root.querySelectorAll(".col").forEach((col) => {
       col.addEventListener("dragover", (e) => {
@@ -1672,9 +1679,15 @@
       });
     });
   }
-  function wireList(root, { onMove, onOpen }) {
+  function wireList(root, { onMove, onOpen, onOpenSession }) {
     root.querySelectorAll(".card").forEach((el) => {
       el.addEventListener("click", () => onOpen(el.dataset.id));
+    });
+    root.querySelectorAll("[data-open-session]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onOpenSession?.(el.dataset.openSession);
+      });
     });
     root.querySelectorAll("[data-move]").forEach((sel) => {
       sel.addEventListener("click", (e) => e.stopPropagation());
@@ -1690,6 +1703,8 @@
   var $ = (id) => document.getElementById(id);
   var STORAGE_KEY = "plane.project";
   var VIEW_KEY = "plane.view";
+  var device = { formFactor: "desktop", pointer: "fine" };
+  var isPhone = () => device.formFactor === "phone" || device.pointer === "coarse";
   var state = {
     phase: "boot",
     // boot | nohost | setup | loading | list | empty | error
@@ -1703,6 +1718,8 @@
     // { id, item, description, loading, error }
     drawer: null,
     // 发起会话参数抽屉
+    bindSheet: null,
+    // 会话菜单动作带来的绑定 { sessionId, sessionTitle }
     toast: null,
     error: null,
     saveState: "",
@@ -1787,7 +1804,7 @@
       const { config } = await callService("/config", { method: "GET" });
       state.config = config;
       state.selected = await readStoredProject();
-      state.view = await readStoredView() === "list" ? "list" : "board";
+      state.view = isPhone() ? "list" : await readStoredView() === "list" ? "list" : "board";
       if (!config.configured) return setPhase("setup");
       await loadProjects();
     } catch (e) {
@@ -1877,6 +1894,10 @@
     state.detail = null;
     render();
     if (id) document.querySelector(`.card[data-id="${id}"]`)?.focus?.();
+  }
+  function openSessionById(sessionId) {
+    if (!sessionId) return;
+    host.openSession(sessionId).then(() => showToast("\u5DF2\u8DF3\u5230\u4F1A\u8BDD")).catch(() => showToast("\u8DF3\u8F6C\u5931\u8D25", null, null, true));
   }
   function itemUrl(item) {
     const base = (state.config?.baseUrl || "").replace(/\/+$/, "");
@@ -2036,8 +2057,8 @@
     }
     if (phase === "board") {
       const detailId = state.detail?.id ?? null;
-      const base = state.view === "list" ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "") : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
-      return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "");
+      const base = state.view === "list" ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "") : boardHTML({ ...state.board, detailId, canDrag: !isPhone() }) + (state.detail ? overlayDetailHTML() : "");
+      return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "") + (state.bindSheet ? bindSheetHTML() : "");
     }
     return "";
   }
@@ -2056,7 +2077,7 @@
     <div class="frow"><span class="k">\u4F18\u5148\u7EA7</span><span>${ESC2(PRIO_LABEL[item.priority] || "\u2014")}</span></div>
     <div class="frow"><span class="k">\u6307\u6D3E</span><span>${ESC2(item.assignees?.map((a) => a.name).filter(Boolean).join("\u3001") || "\u672A\u6307\u6D3E")}</span></div>
     <div class="frow"><span class="k">\u6807\u7B7E</span><span>${item.labels?.length ? item.labels.length + " \u4E2A" : "\u65E0"}</span></div>
-    <div class="frow"><span class="k">\u4F1A\u8BDD</span>${item.sess ? `<span class="chip sess">\u2318 ${ESC2(item.sess)}</span>` : `<button class="btn" data-start-session="${ESC2(item.id)}">\u53D1\u8D77\u4F1A\u8BDD</button>`}</div>
+    <div class="frow"><span class="k">\u4F1A\u8BDD</span>${item.sess ? `<span class="chip sess" data-open-session="${ESC2(item.sess)}">\u2318 ${ESC2(item.sess)} \xB7 \u8DF3\u8F6C</span>` : `<button class="btn" data-start-session="${ESC2(item.id)}">\u53D1\u8D77\u4F1A\u8BDD</button>`}</div>
     <div class="sec"><h4>\u7ED3\u8BBA</h4>${item.concl ? `<div class="desc">${ESC2(item.conclText || "")}</div>
            <div class="fine">\u2713 \u5DF2\u56DE\u586B\u5230 Plane \u8BC4\u8BBA \xB7 ${ESC2(item.conclAt || "")}</div>` : `<div class="fine">${item.sess ? "\u4F1A\u8BDD\u8DD1\u5B8C\u540E\u53EF\u4EE5\u628A\u7ED3\u8BBA\u5199\u56DE\u8FD9\u5F20\u5361\u3002" : "\u8FD8\u6CA1\u6709\u7ED3\u8BBA\u3002"}</div>
            <div class="acts" style="margin-top:8px"><button class="btn" data-backfill="${ESC2(item.id)}">\u56DE\u586B\u7ED3\u8BBA\u2026</button></div>`}</div>
@@ -2302,7 +2323,7 @@
       });
     });
     if (state.phase === "board") {
-      const handlers = { onMove: moveItem, onOpen: openDetail };
+      const handlers = { onMove: moveItem, onOpen: openDetail, onOpenSession: openSessionById };
       if (state.view === "list") wireList($("view"), handlers);
       else wireBoard($("view"), handlers);
     }
@@ -2317,6 +2338,38 @@
     });
     document.querySelectorAll("[data-backfill]").forEach((el) => {
       el.addEventListener("click", () => openConcl(el.dataset.backfill));
+    });
+    document.querySelectorAll("[data-bind-to]").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const b = state.bindSheet;
+        const item = state.board.items.find((i) => i.id === el.dataset.bindTo);
+        if (!b || !item || b.busy) return;
+        b.busy = true;
+        render();
+        try {
+          await callService("/bind-session", {
+            body: { projectId: state.selected, workItemId: item.id, sessionId: b.sessionId }
+          });
+          item.sess = b.sessionId;
+          state.bindSheet = null;
+          render();
+          showToast("\u5DF2\u7ED1\u5B9A\uFF0C\u4F1A\u8BDD\u7ED3\u8BBA\u4F1A\u81EA\u52A8\u56DE\u586B");
+        } catch (e2) {
+          b.busy = false;
+          showToast(`\u7ED1\u5B9A\u5931\u8D25\uFF1A${e2.code || ""} ${e2.message || ""}`, null, null, true);
+        }
+      });
+    });
+    document.querySelectorAll("[data-bind-close]").forEach((el) => {
+      el.addEventListener("click", () => {
+        state.bindSheet = null;
+        render();
+      });
+    });
+    document.querySelectorAll("[data-open-session]").forEach((el) => {
+      el.addEventListener("click", () => {
+        host.openSession(el.dataset.openSession).catch(() => showToast("\u8DF3\u8F6C\u5931\u8D25", null, null, true));
+      });
     });
     document.querySelectorAll("[data-concl-close]").forEach((el) => {
       el.addEventListener("click", () => closeConcl());
@@ -2401,6 +2454,12 @@
     }
   }
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.bindSheet) {
+      e.preventDefault();
+      state.bindSheet = null;
+      render();
+      return;
+    }
     if (e.key === "Escape" && state.concl) {
       e.preventDefault();
       closeConcl();
@@ -2416,6 +2475,37 @@
       closeDetail();
     }
   });
+  function handleHostCallbacks() {
+    host.onResolve(async (req) => {
+      const args = String(req.args || "").trim();
+      const m2 = args.match(/^([A-Za-z]+)-(\d+)$/);
+      if (!m2) return null;
+      const card = state.board.items.find((i) => i.identifier === m2[2]);
+      if (!card) return null;
+      return {
+        providerId: "plane",
+        id: card.id,
+        title: `XLMSC-${card.identifier} ${card.name}`,
+        url: itemUrl(card),
+        kind: "issue",
+        data: { workItemId: card.id }
+      };
+    });
+    host.onItem((item) => {
+      if (!item) return;
+      if (item.kind === "link") {
+        const seq = String(item.identifier || "").replace(/^.*-/, "");
+        const card = state.board.items.find((i) => i.identifier === seq);
+        if (card) return openDetail(card.id);
+        showToast(`\u627E\u4E0D\u5230 ${item.identifier}\uFF0C\u5237\u65B0\u770B\u677F\u8BD5\u8BD5`, null, null, true);
+        return;
+      }
+      if (item.kind === "session") {
+        state.bindSheet = { sessionId: item.sessionId, sessionTitle: item.sessionTitle };
+        render();
+      }
+    });
+  }
   $("proj").addEventListener("change", async (e) => {
     state.selected = e.target.value;
     await storeProject(state.selected);
@@ -2423,12 +2513,21 @@
   });
   $("refresh").addEventListener("click", () => state.phase === "board" ? loadBoard() : loadProjects());
   var ready = false;
+  var booted = false;
   host.onReady((ctx) => {
     ready = true;
     document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
+    if (ctx?.device) {
+      Object.assign(device, ctx.device);
+      document.body.dataset.device = device.formFactor;
+    }
     render();
-    refreshServiceState();
-    boot();
+    if (!booted) {
+      booted = true;
+      refreshServiceState();
+      handleHostCallbacks();
+      boot();
+    }
   });
   host.onConnection?.((c) => {
     $("hostState").textContent = c?.connected === false ? "\u8FDE\u63A5\u4E2D\u65AD" : "\u5DF2\u8FDE\u63A5";
