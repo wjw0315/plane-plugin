@@ -28,3 +28,13 @@ Status: ready-for-agent
 ## Blocked by
 
 - [08 自动回填](08-auto-conclusion-backfill.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `5eb586c`，版本 0.9.0）。
+  - manifest：`commands`（/plane）、`links`（XLMSC 编号 → chip 点击开面板）、`actions`（会话菜单「Plane：挂到工作项」）。
+  - 面板 `handleHostCallbacks()`：`onResolve`（/plane XLMSC-31 → 返回 chip）、`onItem`（link → 打开对应卡详情；session → 绑定抽屉）、卡片 ⌘ 会话角标 → `openSession` 跳转。
+  - onReady 幂等：宿主会推多次 ready（iframe 加载 + 每次 hello），只初始化一次——之前重复初始化会把面板状态打回 boot，这正是调试时「面板莫名回到表单」的原因。
+  - 假宿主实测：resolve 回 chip、link 点击开详情、会话动作绑定成功且角标出现；控制台 0 错误。
+  - **未验收**：真机装上后 /plane 命令与 chip 跳转（仍待 02 真机配置跑通）。
+  - 顺带说明：本条切片期间工作区混入了另一条并行线（issue 10 移动端）的未提交改动（phone CSS / panel.mobile / spec 22），未代为提交。
