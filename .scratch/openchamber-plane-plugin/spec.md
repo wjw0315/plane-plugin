@@ -47,6 +47,13 @@ Plane MCP 解决的是 agent 的调用问题，人的可视化与手动流转在
 21. 作为维护者，我想扩展的写操作（建卡、改状态、建标签）有明确失败语义，以便看板不会静默吞掉失败。
 22. 作为维护者，我想这套扩展在 VS Code / 移动端不加载（宿主不支持），文档里写清以免误报，以便减少无效支持。
 23. 作为团队成员，我想看到 Plane 实例偶发抖动时的重试提示，而不是直接报错成红色故障，以便区分网络抖动与真实故障。
+24. 作为团队成员，我想点一下卡片就在面板里看到这张卡的详情，以便不下钻到浏览器也能判断要不要接。
+25. 作为团队成员，我想在详情里看到编号、优先级、指派人、标签、描述与关联会话，以便一次看全，不必回列表里拼信息。
+26. 作为团队成员，我想在详情里直接切状态，以便看完就顺手推进，不需要先返回看板再拖一次。
+27. 作为团队成员，我想从详情一键在 Plane 网页里打开这张卡，以便需要改描述或评论时跳到原生界面。
+28. 作为团队成员，我想用返回按钮、Esc 或点空白处退出详情，以便不丢看板的位置与滚动。
+29. 作为会话使用者（二期），我想在详情里点关联会话直接跳过去，以便从任务回到对话上下文。
+30. 作为维护者，我想详情与看板共用同一套改状态路径，以便两处行为一致、只维护一份写入逻辑。
 
 ## Implementation Decisions
 
@@ -84,8 +91,17 @@ package.json
 - 用 `@openchamber/sdk` 的 `connectHost()`：`onReady` / `onSettings` / `onDirectory` / `onSession`（二期）/ `serviceRequest` / `toast` / `openExternal`。
 - iframe **不编译 TS、不加载 ESM**，面板必须打成单文件 IIFE 再引用。构建工具随仓库自选（esbuild 最省事）。
 - 面板不持有 Plane 凭据的持久副本：配置来自 `onSettings`，随每次请求下发。
-- 看板状态机：`未配置 → 加载项目 → 加载列与卡片 → 拖拽中 → 回滚/成功`；列与卡片的数据结构只保留渲染必需字段，避免把 Plane 原始响应透传到 UI。
+- 看板状态机：`未配置 → 加载项目 → 加载列与卡片 → 拖拽中 → 回滚/成功 → 打开详情`；列与卡片的数据结构只保留渲染必需字段，避免把 Plane 原始响应透传到 UI。
 - 「记住上次项目」用宿主 storage（`host.storage`），不落本地文件。
+
+**任务详情（卡片点击后的交互）**
+
+- 形态定稿：**面板内覆盖式二级页**（在同一面板宽度内左滑入，不是新窗口、不开浏览器、不弹宿主模态）。理由：面板只有 300–560px，二级页能给出完整字段与足够点击面积，且返回后看板位置与滚动不变（详情以覆盖层叠加，不销毁列表）。
+- 详情字段（一期）：标题、编号（`XLMSC-<sequence_id>`）、状态（可切换）、优先级、指派人、标签、描述、关联会话（只读展示，绑定属二期）。
+- 详情动作：切状态、在 Plane 打开（`host.openExternal`，拼 `{baseUrl}/{workspace}/projects/{identifier}/issues/{sequence_id}`）、复制链接、返回。Escape、返回箭头、点空白遮罩均关闭；打开详情时把焦点移入覆盖层，关闭后焦点回到原卡片（键盘用户不丢位置）。
+- 一期不做标题/描述/指派编辑：写操作只保留「改状态」与「建卡（二期）」，避免和 Plane 原生表单抢职责；需要编辑时走「在 Plane 打开」。
+- 详情改状态复用同一路径：与拖拽共用 `/patch-state`，成功后同样是「乐观更新 + 5 秒撤销」；失败回滚并保留详情页不关。
+- 详情数据来源：优先用列表已带字段直接渲染（秒开），同时发 `POST /work-item` 取最新单条（拿到最新描述与状态），返回后覆盖渲染；单条请求失败只提示「详情可能不是最新」，不阻断查看。
 
 **service（本地进程）**
 
@@ -98,6 +114,7 @@ package.json
 | `/projects` | POST | `{ config }` | `{ projects: [{ id, name, identifier }] }` |
 | `/states` | POST | `{ config, projectId }` | `{ states: [{ id, name, color, order }] }` |
 | `/work-items` | POST | `{ config, projectId, stateId? }` | `{ items: [{ id, identifier, name, stateId, priority, assignees, labels }] }` |
+| `/work-item` | POST | `{ config, projectId, workItemId }` | `{ item, description }`（详情覆盖层用，取最新单条） |
 | `/patch-state` | POST | `{ config, projectId, workItemId, stateId }` | `{ item }` |
 | `/labels` | POST | `{ config, projectId? }` | `{ labels: [{ id, name }] }` |
 
@@ -139,8 +156,9 @@ package.json
 
 **接缝 C：iframe 侧 host API 适配层**
 
-- 把 `connectHost()` 换成注入的假 bridge（对象：`serviceRequest` / `onSettings` / `onSession` / `openSession` / `toast` / `storage`），断言：设置变更后下一次请求带新 config；`onSession` 事件只触发卡片标记刷新而不发建卡请求；卡片点击调 `openSession` 的参数正确。
-- 这条接缝只在二期真正吃重（一期只有 settings/directory），一期先立骨架。
+- 把 `connectHost()` 换成注入的假 bridge（对象：`serviceRequest` / `onSettings` / `onSession` / `openSession` / `openExternal` / `toast` / `storage`），断言：设置变更后下一次请求带新 config；`onSession` 事件只触发卡片标记刷新而不发建卡请求；卡片点击调 `openSession` 的参数正确。
+- 详情交互也在这一层测：点卡片 → 覆盖层出现、列表节点未被卸载（返回后滚动位置不变）；详情里切状态只发一次 `/patch-state`（不重复发列表请求）；Esc 与返回箭头都关闭详情且焦点回到原卡片；「在 Plane 打开」→ `openExternal` 收到拼好的 URL；单条详情请求失败 → 出「可能不是最新」提示但仍渲染列表数据。
+- 这条接缝只在二期真正吃重（一期只有 settings/directory 与详情动作），一期先立骨架。
 
 **好测试的判据**
 
@@ -165,3 +183,4 @@ package.json
 - 已知抖动：该实例偶发 `fetch failed` / 502，所以重试语义写进了契约而不是留给 UI。
 - 面板里不放「建卡」入口的一期原因：一期只做读写看板，建卡属于二期会话打通的一部分，避免一期出现两个建卡口子（命令 + 按钮）语义不一致。
 - 若将来 Plane 升到 1.x，`apiVersion` 切 `v2` 即可回归，无需改面板；这是把版本差异关在 service 里的直接收益。
+- 布局原型（一次性，可丢弃）：`.scratch/openchamber-plane-plugin/prototype/panel-prototype.html`，`?variant=A|B|C` 或 ← → 切换，三档分别是「列式看板 + 覆盖详情」「分组列表 + 就地展开」「聚焦单列 + 底部抽屉」。看板形态未裁定；上面「覆盖式二级页」是详情形态的先行定稿（原型 A 档），B/C 两种替代形态留作对比，裁定后回填本节。
