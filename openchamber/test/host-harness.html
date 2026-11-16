@@ -27,6 +27,8 @@
       <button id="drag">3. 拖第一张卡到 Todo</button>
       <button id="toList">4. 切到列表视图</button>
       <button id="moveSel">5. 下拉改到 Todo</button>
+      <button id="openCard">6. 打开第一张卡详情</button>
+      <button id="esc">7. Esc 关闭详情</button>
     </div>
     <iframe id="panel" src="../panel/index.html" style="height:calc(100% - 34px)"></iframe>
   </div>
@@ -105,6 +107,12 @@ function routeService(p) {
   if (path === "/config" && p.method === "POST") {
     fake.configured = true;
     return { status: 200, body: JSON.stringify({ ok: true, config: { configured: true, baseUrl: "http://192.168.1.188:8080", workspace: "g2", apiVersion: "v1", hasKey: true } }) };
+  }
+  if (path === "/work-item") {
+    const body = JSON.parse(p.body || "{}");
+    const item = fake.items.find((i) => i.id === body.workItemId);
+    if (!item) return { status: 404, body: JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "没有这条" } }) };
+    return { status: 200, body: JSON.stringify({ ok: true, item, description: "第二页之后列表会把第 1 页的数据重复渲染。\n- 复现：翻到第 2 页\n- 期望：无重复" }) };
   }
   if (path === "/states") {
     return { status: 200, body: JSON.stringify({ ok: true, states: fake.states }) };
@@ -212,6 +220,17 @@ document.getElementById("moveSel").addEventListener("click", () => {
   sel.value = "s2";
   sel.dispatchEvent(new d.defaultView.Event("change", { bubbles: true }));
   log("已用下拉把第一张卡改到 Todo", "ok");
+});
+
+document.getElementById("openCard").addEventListener("click", () => {
+  const card = frame.contentDocument?.querySelector(".card");
+  if (!card) return log("找不到卡片", "err");
+  card.click();
+  log("已点击第一张卡", "ok");
+});
+document.getElementById("esc").addEventListener("click", () => {
+  frame.contentDocument?.dispatchEvent(new frame.contentDocument.defaultView.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  log("已发送 Esc", "ok");
 });
 
 document.getElementById("go").addEventListener("click", () => {

@@ -167,3 +167,30 @@ export async function patchState(cfg, projectId, workItemId, stateId, fetchImpl 
   );
   return mapItem(data);
 }
+
+/** 极简 HTML → 文本：Plane 的描述是 description_html，面板只需要能读。 */
+export function htmlToText(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** 单条工作项 + 描述文本（详情用，取最新）。 */
+export async function getWorkItem(cfg, projectId, workItemId, fetchImpl = fetch) {
+  const raw = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/`,
+    { fetchImpl },
+  );
+  return { item: mapItem(raw), description: htmlToText(raw?.description_html ?? raw?.description ?? "") };
+}

@@ -1590,7 +1590,7 @@
     none: { label: "", cls: "" }
   };
   var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  function boardHTML({ states, items }) {
+  function boardHTML({ states, items, detailId }) {
     if (!states.length) {
       return `<div class="empty"><div class="t">\u8FD9\u4E2A\u9879\u76EE\u8FD8\u6CA1\u6709\u72B6\u6001</div>
       <div>\u53BB Plane \u91CC\u7ED9\u9879\u76EE\u914D\u4E00\u5957\u72B6\u6001\uFF08Backlog / Todo / \u2026\uFF09\uFF0C\u770B\u677F\u5217\u4F1A\u8DDF\u7740\u53D8\u3002</div></div>`;
@@ -1599,16 +1599,32 @@
       const list = items.filter((i) => i.stateId === s.id);
       return `<section class="col" data-state-id="${ESC(s.id)}">
         <h2><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></h2>
-        <div class="drop">${list.map(cardHTML).join("") || '<div class="blank">\u62D6\u5230\u8FD9\u91CC</div>'}</div>
+        <div class="drop">${list.map((i) => cardHTML(i, true, detailId)).join("") || '<div class="blank">\u62D6\u5230\u8FD9\u91CC</div>'}</div>
       </section>`;
     }).join("");
     return `<div class="board">${columns}</div>`;
   }
-  function cardHTML(item, draggable = true) {
+  function listHTML({ states, items, detailId }) {
+    if (!states.length) return boardHTML({ states, items, detailId });
+    return states.map((s) => {
+      const list = items.filter((i) => i.stateId === s.id);
+      const body = list.length ? list.map((it) => cardHTML(it, false, detailId) + (detailId === it.id ? "" : moveHTML(it, states))).join("") : '<div class="blank">\u8FD9\u4E2A\u72B6\u6001\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u9879</div>';
+      return `<details class="group" open>
+        <summary><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></summary>
+        <div class="gin">${body}</div>
+      </details>`;
+    }).join("");
+  }
+  function moveHTML(item, states) {
+    const options = states.map((s) => `<option value="${ESC(s.id)}"${s.id === item.stateId ? " selected" : ""}>${ESC(s.name)}</option>`).join("");
+    return `<div class="moveto">\u79FB\u52A8\u5230 <select data-move="${ESC(item.id)}">${options}</select></div>`;
+  }
+  function cardHTML(item, draggable, detailId) {
     const p = PRIO[item.priority] || PRIO.none;
     const who = item.assignees?.[0]?.name || "";
     const initial = who ? who.slice(-2) : "";
-    return `<article class="card" draggable="${draggable}" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
+    const sel = detailId === item.id ? " sel" : "";
+    return `<article class="card${sel}" draggable="${draggable}" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
     <div class="t">${ESC(item.name)}</div>
     <div class="meta">
       <span class="ident">${item.identifier ? "XLMSC-" + ESC(item.identifier) : ""}</span>
@@ -1619,9 +1635,10 @@
     </div>
   </article>`;
   }
-  function wireBoard(root, { onMove }) {
+  function wireBoard(root, { onMove, onOpen }) {
     let dragging = null;
     root.querySelectorAll(".card[draggable]").forEach((el) => {
+      el.addEventListener("click", () => onOpen(el.dataset.id));
       el.addEventListener("dragstart", (e) => {
         dragging = el.dataset.id;
         el.classList.add("dragging");
@@ -1654,23 +1671,12 @@
       });
     });
   }
-  function listHTML({ states, items }) {
-    if (!states.length) return boardHTML({ states, items });
-    return states.map((s) => {
-      const list = items.filter((i) => i.stateId === s.id);
-      const body = list.length ? list.map((it) => cardHTML(it, false) + moveHTML(it, states)).join("") : '<div class="blank">\u8FD9\u4E2A\u72B6\u6001\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u9879</div>';
-      return `<details class="group" open>
-        <summary><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></summary>
-        <div class="gin">${body}</div>
-      </details>`;
-    }).join("");
-  }
-  function moveHTML(item, states) {
-    const options = states.map((s) => `<option value="${ESC(s.id)}"${s.id === item.stateId ? " selected" : ""}>${ESC(s.name)}</option>`).join("");
-    return `<div class="moveto">\u79FB\u52A8\u5230 <select data-move="${ESC(item.id)}">${options}</select></div>`;
-  }
-  function wireList(root, { onMove }) {
+  function wireList(root, { onMove, onOpen }) {
+    root.querySelectorAll(".card").forEach((el) => {
+      el.addEventListener("click", () => onOpen(el.dataset.id));
+    });
     root.querySelectorAll("[data-move]").forEach((sel) => {
+      sel.addEventListener("click", (e) => e.stopPropagation());
       sel.addEventListener("change", () => {
         if (sel.value) onMove(sel.dataset.move, sel.value);
       });
@@ -1692,6 +1698,8 @@
     board: { states: [], items: [] },
     view: "board",
     // board | list
+    detail: null,
+    // { id, item, description, loading, error }
     toast: null,
     error: null,
     saveState: "",
@@ -1840,6 +1848,37 @@
       render();
       showToast(`\u79FB\u52A8\u5931\u8D25\uFF1A${e.code || ""} ${e.message || ""}`, null, null, true);
     }
+  }
+  async function openDetail(id) {
+    const item = state.board.items.find((i) => i.id === id);
+    if (!item) return;
+    if (state.detail?.id === id) return closeDetail();
+    state.detail = { id, item, description: null, loading: true, error: null };
+    render();
+    try {
+      const { item: fresh, description } = await callService("/work-item", {
+        body: { projectId: state.selected, workItemId: id }
+      });
+      if (!state.detail || state.detail.id !== id) return;
+      Object.assign(item, fresh);
+      state.detail = { id, item, description, loading: false, error: null };
+      render();
+    } catch (e) {
+      if (!state.detail || state.detail.id !== id) return;
+      state.detail = { ...state.detail, loading: false, error: { code: e.code || "", message: e.message || "" } };
+      render();
+    }
+  }
+  function closeDetail() {
+    const id = state.detail?.id;
+    state.detail = null;
+    render();
+    if (id) document.querySelector(`.card[data-id="${id}"]`)?.focus?.();
+  }
+  function itemUrl(item) {
+    const base = (state.config?.baseUrl || "").replace(/\/+$/, "");
+    const ws = state.config?.workspace || "";
+    return `${base}/${ws}/projects/${state.selected}/issues/${item.id}/`;
   }
   function showToast(text, actionLabel, onAction, isError) {
     state.toast = { text, actionLabel, onAction, isError };
@@ -1993,9 +2032,44 @@
       <div class="acts"><button data-act="retry">\u5237\u65B0</button><button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
     }
     if (phase === "board") {
-      return state.view === "list" ? listHTML(state.board) : boardHTML(state.board);
+      const detailId = state.detail?.id ?? null;
+      if (state.view === "list") {
+        return listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "");
+      }
+      return boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
     }
     return "";
+  }
+  var PRIO_LABEL = { urgent: "\u7D27\u6025", high: "\u9AD8", medium: "\u4E2D", low: "\u4F4E", none: "\u2014" };
+  function detailBody(item) {
+    const d = state.detail;
+    const states = state.board.states;
+    const stateButtons = states.map(
+      (s) => `<button class="stbtn" data-setstate="${ESC2(item.id)}" data-to="${ESC2(s.id)}"
+        aria-pressed="${s.id === item.stateId}">${ESC2(s.name)}</button>`
+    ).join("");
+    const desc = d.loading ? '<div class="fine">\u6B63\u5728\u53D6\u6700\u65B0\u63CF\u8FF0\u2026</div>' : d.error ? `<div class="err">${ESC2(d.error.code)}${d.error.message ? "\uFF1A" + ESC2(d.error.message) : ""}\uFF08\u770B\u677F\u6570\u636E\u4ECD\u53EF\u7528\uFF09</div>` : d.description ? `<div class="desc">${ESC2(d.description)}</div>` : '<div class="fine">\u8FD9\u5F20\u5361\u6CA1\u6709\u63CF\u8FF0</div>';
+    return `<h3 class="dtitle">${ESC2(item.name)}</h3>
+    <div class="frow"><span class="k">\u72B6\u6001</span><span class="stbtns">${stateButtons}</span></div>
+    <div class="frow"><span class="k">\u7F16\u53F7</span><span class="ident">${item.identifier ? "XLMSC-" + ESC2(item.identifier) : "\u2014"}</span></div>
+    <div class="frow"><span class="k">\u4F18\u5148\u7EA7</span><span>${ESC2(PRIO_LABEL[item.priority] || "\u2014")}</span></div>
+    <div class="frow"><span class="k">\u6307\u6D3E</span><span>${ESC2(item.assignees?.map((a) => a.name).filter(Boolean).join("\u3001") || "\u672A\u6307\u6D3E")}</span></div>
+    <div class="frow"><span class="k">\u6807\u7B7E</span><span>${item.labels?.length ? item.labels.length + " \u4E2A" : "\u65E0"}</span></div>
+    <div class="frow"><span class="k">\u4F1A\u8BDD</span><span class="fine">\u672A\u7ED1\u5B9A\uFF0806 \u7247\u63A5\u5165\uFF09</span></div>
+    <div class="sec"><h4>\u63CF\u8FF0</h4>${desc}</div>
+    <div class="acts">
+      <button class="btn pri" data-plane="${ESC2(item.id)}">\u5728 Plane \u6253\u5F00 \u2197</button>
+      <button class="btn" data-copy="${ESC2(item.id)}">\u590D\u5236\u94FE\u63A5</button>
+    </div>`;
+  }
+  function overlayDetailHTML() {
+    return `<div class="overlay"><div class="dhead"><button class="back" data-close="1" title="\u8FD4\u56DE">\u2039</button>
+    <span class="ident">${state.detail.item.identifier ? "XLMSC-" + ESC2(state.detail.item.identifier) : ""}</span>
+    <span class="grow"></span><span class="fine">Esc \u8FD4\u56DE</span></div>
+    <div class="dbody">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">\u5173\u95ED</button></div></div></div>`;
+  }
+  function inlineDetailHTML() {
+    return `<div class="inlineD">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">\u6536\u8D77</button></div></div>`;
   }
   function wire() {
     const form = $("setupForm");
@@ -2023,9 +2097,34 @@
       });
     });
     if (state.phase === "board") {
-      if (state.view === "list") wireList($("view"), { onMove: moveItem });
-      else wireBoard($("view"), { onMove: moveItem });
+      const handlers = { onMove: moveItem, onOpen: openDetail };
+      if (state.view === "list") wireList($("view"), handlers);
+      else wireBoard($("view"), handlers);
     }
+    document.querySelectorAll("[data-close]").forEach((el) => {
+      el.addEventListener("click", () => closeDetail());
+    });
+    document.querySelectorAll("[data-setstate]").forEach((el) => {
+      el.addEventListener("click", () => moveItem(el.dataset.setstate, el.dataset.to));
+    });
+    document.querySelectorAll("[data-plane]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const item = state.board.items.find((i) => i.id === el.dataset.plane);
+        if (item) host.openUrl(itemUrl(item)).catch(() => showToast("\u6253\u4E0D\u5F00\u6D4F\u89C8\u5668", null, null, true));
+      });
+    });
+    document.querySelectorAll("[data-copy]").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const item = state.board.items.find((i) => i.id === el.dataset.copy);
+        if (!item) return;
+        try {
+          await host.writeClipboard(itemUrl(item));
+          showToast("\u94FE\u63A5\u5DF2\u590D\u5236");
+        } catch {
+          showToast("\u590D\u5236\u5931\u8D25", null, null, true);
+        }
+      });
+    });
     document.querySelectorAll("[data-view]").forEach((el) => {
       el.addEventListener("click", async () => {
         const v = el.dataset.view;
@@ -2045,6 +2144,12 @@
       });
     }
   }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.detail) {
+      e.preventDefault();
+      closeDetail();
+    }
+  });
   $("proj").addEventListener("change", async (e) => {
     state.selected = e.target.value;
     await storeProject(state.selected);

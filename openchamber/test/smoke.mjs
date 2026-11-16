@@ -74,6 +74,12 @@ const fakePlane = http.createServer((req, res) => {
         assignees: [{ id: "u1", display_name: "王五" }], labels: [{ id: "l1", name: "后端" }] },
     ] });
   }
+  if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/p1/issues/i1/") {
+    return json(200, {
+      id: "i1", name: "任务A", state: "s1", sequence_id: 12, priority: "high",
+      assignees: [], labels: [], description_html: "<p>第二页重复</p><ul><li>复现：翻到第 2 页</li></ul>",
+    });
+  }
   if (req.method === "PATCH" && path === "/api/v1/workspaces/g2/projects/p1/issues/i1/") {
     let raw = "";
     req.on("data", (c) => (raw += c));
@@ -206,6 +212,23 @@ try {
 
   const missingItem = await call("/patch-state", { method: "POST", body: { projectId: "p1", workItemId: "nope", stateId: "s2" } });
   check("改不存在的工作项 → NOT_FOUND", missingItem.status === 404 && missingItem.body?.error?.code === "NOT_FOUND");
+
+  /* ---------------- 05 片：单条工作项 + 描述 ---------------- */
+
+  const one = await call("/work-item", { method: "POST", body: { projectId: "p1", workItemId: "i1" } });
+  check(
+    "取单条工作项带描述",
+    one.status === 200 && one.body?.item?.identifier === "12" && /第二页重复/.test(one.body?.description || ""),
+    JSON.stringify(one.body?.description || "").slice(0, 120),
+  );
+  check(
+    "描述 HTML 转成带换行/列表的纯文本",
+    /复现：翻到第 2 页/.test(one.body?.description || "") && /\n- /.test(one.body?.description || ""),
+    JSON.stringify(one.body?.description || ""),
+  );
+
+  const oneMissing = await call("/work-item", { method: "POST", body: { projectId: "p1", workItemId: "nope" } });
+  check("取不存在的工作项 → NOT_FOUND", oneMissing.status === 404 && oneMissing.body?.error?.code === "NOT_FOUND");
 
   const badPatch = await call("/patch-state", { method: "POST", body: { projectId: "p1" } });
   check("缺参数 → BAD_CONFIG", badPatch.status === 400 && badPatch.body?.error?.code === "BAD_CONFIG");

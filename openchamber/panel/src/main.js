@@ -21,6 +21,7 @@ const state = {
   selected: null,
   board: { states: [], items: [] },
   view: "board", // board | list
+  detail: null, // { id, item, description, loading, error }
   toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
@@ -180,6 +181,42 @@ async function moveItem(itemId, toStateId) {
     render();
     showToast(`移动失败：${e.code || ""} ${e.message || ""}`, null, null, true);
   }
+}
+
+/** 打开详情：先用列表里的数据秒开，再拉一条最新的覆盖。 */
+async function openDetail(id) {
+  const item = state.board.items.find((i) => i.id === id);
+  if (!item) return;
+  if (state.detail?.id === id) return closeDetail();
+  state.detail = { id, item, description: null, loading: true, error: null };
+  render();
+  try {
+    const { item: fresh, description } = await callService("/work-item", {
+      body: { projectId: state.selected, workItemId: id },
+    });
+    if (!state.detail || state.detail.id !== id) return;
+    Object.assign(item, fresh);
+    state.detail = { id, item, description, loading: false, error: null };
+    render();
+  } catch (e) {
+    if (!state.detail || state.detail.id !== id) return;
+    state.detail = { ...state.detail, loading: false, error: { code: e.code || "", message: e.message || "" } };
+    render();
+  }
+}
+
+function closeDetail() {
+  const id = state.detail?.id;
+  state.detail = null;
+  render();
+  if (id) document.querySelector(`.card[data-id="${id}"]`)?.focus?.();
+}
+
+/** 用 Plane 网页打开这张卡。 */
+function itemUrl(item) {
+  const base = (state.config?.baseUrl || "").replace(/\/+$/, "");
+  const ws = state.config?.workspace || "";
+  return `${base}/${ws}/projects/${state.selected}/issues/${item.id}/`;
 }
 
 function showToast(text, actionLabel, onAction, isError) {
@@ -362,10 +399,60 @@ function viewFor(phase) {
   }
 
   if (phase === "board") {
-    return state.view === "list" ? listHTML(state.board) : boardHTML(state.board);
+    const detailId = state.detail?.id ?? null;
+    if (state.view === "list") {
+      return listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "");
+    }
+    return boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
   }
 
   return "";
+}
+
+/* ---------------- 详情 ---------------- */
+
+const PRIO_LABEL = { urgent: "紧急", high: "高", medium: "中", low: "低", none: "—" };
+
+function detailBody(item) {
+  const d = state.detail;
+  const states = state.board.states;
+  const stateButtons = states
+    .map(
+      (s) => `<button class="stbtn" data-setstate="${ESC(item.id)}" data-to="${ESC(s.id)}"
+        aria-pressed="${s.id === item.stateId}">${ESC(s.name)}</button>`,
+    )
+    .join("");
+  const desc = d.loading
+    ? '<div class="fine">正在取最新描述…</div>'
+    : d.error
+      ? `<div class="err">${ESC(d.error.code)}${d.error.message ? "：" + ESC(d.error.message) : ""}（看板数据仍可用）</div>`
+      : d.description
+        ? `<div class="desc">${ESC(d.description)}</div>`
+        : '<div class="fine">这张卡没有描述</div>';
+
+  return `<h3 class="dtitle">${ESC(item.name)}</h3>
+    <div class="frow"><span class="k">状态</span><span class="stbtns">${stateButtons}</span></div>
+    <div class="frow"><span class="k">编号</span><span class="ident">${item.identifier ? "XLMSC-" + ESC(item.identifier) : "—"}</span></div>
+    <div class="frow"><span class="k">优先级</span><span>${ESC(PRIO_LABEL[item.priority] || "—")}</span></div>
+    <div class="frow"><span class="k">指派</span><span>${ESC(item.assignees?.map((a) => a.name).filter(Boolean).join("、") || "未指派")}</span></div>
+    <div class="frow"><span class="k">标签</span><span>${item.labels?.length ? item.labels.length + " 个" : "无"}</span></div>
+    <div class="frow"><span class="k">会话</span><span class="fine">未绑定（06 片接入）</span></div>
+    <div class="sec"><h4>描述</h4>${desc}</div>
+    <div class="acts">
+      <button class="btn pri" data-plane="${ESC(item.id)}">在 Plane 打开 ↗</button>
+      <button class="btn" data-copy="${ESC(item.id)}">复制链接</button>
+    </div>`;
+}
+
+function overlayDetailHTML() {
+  return `<div class="overlay"><div class="dhead"><button class="back" data-close="1" title="返回">‹</button>
+    <span class="ident">${state.detail.item.identifier ? "XLMSC-" + ESC(state.detail.item.identifier) : ""}</span>
+    <span class="grow"></span><span class="fine">Esc 返回</span></div>
+    <div class="dbody">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">关闭</button></div></div></div>`;
+}
+
+function inlineDetailHTML() {
+  return `<div class="inlineD">${detailBody(state.detail.item)}<div class="acts"><button class="btn" data-close="1">收起</button></div></div>`;
 }
 
 /* ---------------- 事件 ---------------- */
@@ -398,9 +485,35 @@ function wire() {
   });
 
   if (state.phase === "board") {
-    if (state.view === "list") wireList($("view"), { onMove: moveItem });
-    else wireBoard($("view"), { onMove: moveItem });
+    const handlers = { onMove: moveItem, onOpen: openDetail };
+    if (state.view === "list") wireList($("view"), handlers);
+    else wireBoard($("view"), handlers);
   }
+
+  document.querySelectorAll("[data-close]").forEach((el) => {
+    el.addEventListener("click", () => closeDetail());
+  });
+  document.querySelectorAll("[data-setstate]").forEach((el) => {
+    el.addEventListener("click", () => moveItem(el.dataset.setstate, el.dataset.to));
+  });
+  document.querySelectorAll("[data-plane]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const item = state.board.items.find((i) => i.id === el.dataset.plane);
+      if (item) host.openUrl(itemUrl(item)).catch(() => showToast("打不开浏览器", null, null, true));
+    });
+  });
+  document.querySelectorAll("[data-copy]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const item = state.board.items.find((i) => i.id === el.dataset.copy);
+      if (!item) return;
+      try {
+        await host.writeClipboard(itemUrl(item));
+        showToast("链接已复制");
+      } catch {
+        showToast("复制失败", null, null, true);
+      }
+    });
+  });
 
   document.querySelectorAll("[data-view]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -422,6 +535,13 @@ function wire() {
     });
   }
 }
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.detail) {
+    e.preventDefault();
+    closeDetail();
+  }
+});
 
 $("proj").addEventListener("change", async (e) => {
   state.selected = e.target.value;

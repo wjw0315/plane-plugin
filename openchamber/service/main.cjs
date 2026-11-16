@@ -195,6 +195,18 @@ async function patchState(cfg, projectId, workItemId, stateId, fetchImpl = fetch
   );
   return mapItem(data);
 }
+function htmlToText(html) {
+  if (!html) return "";
+  return String(html).replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6])>/gi, "\n").replace(/<li[^>]*>/gi, "- ").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\n{3,}/g, "\n\n").trim();
+}
+async function getWorkItem(cfg, projectId, workItemId, fetchImpl = fetch) {
+  const raw = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/`,
+    { fetchImpl }
+  );
+  return { item: mapItem(raw), description: htmlToText(raw?.description_html ?? raw?.description ?? "") };
+}
 
 // service/src/main.js
 var PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
@@ -254,7 +266,7 @@ var server = import_node_http.default.createServer(async (req, res) => {
   const path = (req.url || "").split("?")[0];
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.4.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.5.0" });
       return;
     }
     if (req.method === "GET" && path === "/config") {
@@ -293,6 +305,14 @@ var server = import_node_http.default.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const items = await listWorkItems(cfg, body.projectId, body.stateId);
       sendJson(res, 200, { ok: true, items });
+      return;
+    }
+    if (req.method === "POST" && path === "/work-item") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId) throw new PlaneError("BAD_CONFIG", "work-item \u9700\u8981 projectId / workItemId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const got = await getWorkItem(cfg, body.projectId, body.workItemId);
+      sendJson(res, 200, { ok: true, ...got });
       return;
     }
     if (req.method === "POST" && path === "/patch-state") {

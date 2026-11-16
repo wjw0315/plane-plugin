@@ -13,11 +13,12 @@
  *   POST /projects  用已保存的配置列项目
  *   POST /states     列项目的状态（看板列）
  *   POST /work-items 列工作项（可按 stateId 过滤）
+ *   POST /work-item   取单条工作项 + 描述（详情用）
  *   POST /patch-state 改工作项状态
  */
 import http from "node:http";
 import { loadConfig, saveConfig, maskConfig } from "./config.js";
-import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, PlaneError } from "./plane.js";
+import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, PlaneError } from "./plane.js";
 
 const PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
 const TOKEN = process.env.OPENCHAMBER_SERVICE_TOKEN || "";
@@ -86,7 +87,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.4.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.5.0" });
       return;
     }
 
@@ -131,6 +132,15 @@ const server = http.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const items = await listWorkItems(cfg, body.projectId, body.stateId);
       sendJson(res, 200, { ok: true, items });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/work-item") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId) throw new PlaneError("BAD_CONFIG", "work-item 需要 projectId / workItemId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const got = await getWorkItem(cfg, body.projectId, body.workItemId);
+      sendJson(res, 200, { ok: true, ...got });
       return;
     }
 
