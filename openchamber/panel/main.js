@@ -1746,11 +1746,13 @@
     box.textContent = text;
   }
   window.addEventListener("error", (e) => {
-    paintCrash(`\u9762\u677F\u811A\u672C\u51FA\u9519\uFF1A${e.message}`);
+    const stack = e.error?.stack || "";
+    paintCrash(`\u9762\u677F\u811A\u672C\u51FA\u9519\uFF1A${e.message}${stack ? "\n" + stack.slice(0, 1200) : ""}`);
   });
   window.addEventListener("unhandledrejection", (e) => {
     const r = e.reason;
-    paintCrash(`\u672A\u5904\u7406\u7684\u5F02\u6B65\u9519\u8BEF\uFF1A${r?.code ? r.code + "\uFF1A" : ""}${r?.message || String(r)}`);
+    const stack = r?.stack || "";
+    paintCrash(`\u672A\u5904\u7406\u7684\u5F02\u6B65\u9519\u8BEF\uFF1A${r?.code ? r.code + "\uFF1A" : ""}${r?.message || String(r)}${stack ? "\n" + stack.slice(0, 1200) : ""}`);
   });
   var CALL_TIMEOUT_MS = 2e4;
   function withTimeout(promise, ms, method, path) {
@@ -2552,7 +2554,16 @@
     }
   });
   function handleHostCallbacks() {
-    host.onResolve(async (req) => {
+    const guarded = (label, fn) => (...args) => {
+      try {
+        const out = fn(...args);
+        if (out && typeof out.catch === "function") out.catch((e) => paintCrash(`${label}\uFF1A${e.code ? e.code + "\uFF1A" : ""}${e.stack || e.message || e}`));
+        return out;
+      } catch (e) {
+        paintCrash(`${label}\uFF1A${e.stack || e.message || String(e)}`);
+      }
+    };
+    host.onResolve(guarded("resolve", async (req) => {
       const args = String(req.args || "").trim();
       const m2 = args.match(/^([A-Za-z]+)-(\d+)$/);
       if (!m2) return null;
@@ -2566,8 +2577,8 @@
         kind: "issue",
         data: { workItemId: card.id }
       };
-    });
-    host.onItem((item) => {
+    }));
+    host.onItem(guarded("item", (item) => {
       if (!item) return;
       if (item.kind === "link") {
         const seq = String(item.identifier || "").replace(/^.*-/, "");
@@ -2580,7 +2591,7 @@
         state.bindSheet = { sessionId: item.sessionId, sessionTitle: item.sessionTitle };
         render();
       }
-    });
+    }));
   }
   $("proj").addEventListener("change", async (e) => {
     state.selected = e.target.value;
@@ -2602,7 +2613,7 @@
       booted = true;
       refreshServiceState();
       handleHostCallbacks();
-      boot();
+      boot().catch((e) => paintCrash(`\u521D\u59CB\u5316\u5931\u8D25\uFF1A${e.code ? e.code + "\uFF1A" : ""}${e.stack || e.message || e}`));
     }
   });
   host.onConnection?.((c) => {

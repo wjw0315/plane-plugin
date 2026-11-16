@@ -10,6 +10,19 @@ import { boardHTML, listHTML, wireBoard, wireList } from "./board.js";
 
 const BUILD = "0.2.1+diag";
 const host = connectHost();
+
+/** 把 async 回调的异常接住并画到诊断区——沙箱 iframe 里未捕获错误只会显示「Script error.」，拿不到细节。 */
+function guard(fn, label) {
+  return async (...args) => {
+    try {
+      return await fn(...args);
+    } catch (e) {
+      const text = `[${label || "panel"}] ${e.code ? e.code + "：" : ""}${e.message || String(e)}${e.stack ? "\n" + String(e.stack).slice(0, 1500) : ""}`;
+      paintCrash(text);
+      throw e;
+    }
+  };
+}
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = "plane.project";
 const VIEW_KEY = "plane.view";
@@ -54,11 +67,13 @@ function paintCrash(text) {
 }
 
 window.addEventListener("error", (e) => {
-  paintCrash(`面板脚本出错：${e.message}`);
+  const stack = e.error?.stack || "";
+  paintCrash(`面板脚本出错：${e.message}${stack ? "\n" + stack.slice(0, 1200) : ""}`);
 });
 window.addEventListener("unhandledrejection", (e) => {
   const r = e.reason;
-  paintCrash(`未处理的异步错误：${r?.code ? r.code + "：" : ""}${r?.message || String(r)}`);
+  const stack = r?.stack || "";
+  paintCrash(`未处理的异步错误：${r?.code ? r.code + "：" : ""}${r?.message || String(r)}${stack ? "\n" + stack.slice(0, 1200) : ""}`);
 });
 
 /* ---------------- service 调用 ---------------- */
@@ -981,7 +996,16 @@ document.addEventListener("keydown", (e) => {
 
 /** 宿主回调：/plane 命令、聊天里的编号 chip、会话菜单动作。 */
 function handleHostCallbacks() {
-  host.onResolve(async (req) => {
+  const guarded = (label, fn) => (...args) => {
+    try {
+      const out = fn(...args);
+      if (out && typeof out.catch === "function") out.catch((e) => paintCrash(`${label}：${e.code ? e.code + "：" : ""}${e.stack || e.message || e}`));
+      return out;
+    } catch (e) {
+      paintCrash(`${label}：${e.stack || e.message || String(e)}`);
+    }
+  };
+  host.onResolve(guarded("resolve", async (req) => {
     const args = String(req.args || "").trim();
     const m2 = args.match(/^([A-Za-z]+)-(\d+)$/);
     if (!m2) return null;
@@ -995,9 +1019,9 @@ function handleHostCallbacks() {
       kind: "issue",
       data: { workItemId: card.id },
     };
-  });
+  }));
 
-  host.onItem((item) => {
+  host.onItem(guarded("item", (item) => {
     if (!item) return;
     if (item.kind === "link") {
       const seq = String(item.identifier || "").replace(/^.*-/, "");
@@ -1010,7 +1034,7 @@ function handleHostCallbacks() {
       state.bindSheet = { sessionId: item.sessionId, sessionTitle: item.sessionTitle };
       render();
     }
-  });
+  }));
 }
 
 $("proj").addEventListener("change", async (e) => {
@@ -1036,7 +1060,7 @@ host.onReady((ctx) => {
     booted = true; // 宿主会多次推 ready（iframe 加载 + 每次 hello），业务只初始化一次
     refreshServiceState();
     handleHostCallbacks();
-    boot();
+    boot().catch((e) => paintCrash(`初始化失败：${e.code ? e.code + "：" : ""}${e.stack || e.message || e}`));
   }
 });
 
