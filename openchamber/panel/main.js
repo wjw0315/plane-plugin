@@ -429,44 +429,44 @@
   ]);
   var asWireRecord = (data) => Object(data) === data ? data : null;
   var isNonEmptyString = (value) => String(value) === value && value.length > 0;
-  var readResultMessage = (wire) => {
-    if (!isNonEmptyString(wire.id))
+  var readResultMessage = (wire2) => {
+    if (!isNonEmptyString(wire2.id))
       return null;
-    if (wire.ok === true) {
+    if (wire2.ok === true) {
       const message = {
         channel: OPENCHAMBER_SDK_CHANNEL,
         v: OPENCHAMBER_SDK_API_VERSION,
         type: "result",
-        id: wire.id,
+        id: wire2.id,
         ok: true
       };
-      if (Object(wire.payload) === wire.payload) {
-        message.payload = wire.payload;
+      if (Object(wire2.payload) === wire2.payload) {
+        message.payload = wire2.payload;
       }
       return message;
     }
-    if (wire.ok === false && isNonEmptyString(wire.error)) {
+    if (wire2.ok === false && isNonEmptyString(wire2.error)) {
       return {
         channel: OPENCHAMBER_SDK_CHANNEL,
         v: OPENCHAMBER_SDK_API_VERSION,
         type: "result",
-        id: wire.id,
+        id: wire2.id,
         ok: false,
-        error: wire.error,
-        code: resolveHostRequestErrorCode(isNonEmptyString(wire.code) ? wire.code : void 0)
+        error: wire2.error,
+        code: resolveHostRequestErrorCode(isNonEmptyString(wire2.code) ? wire2.code : void 0)
       };
     }
     return null;
   };
   var readHostMessage = (data) => {
-    const wire = asWireRecord(data);
-    if (!wire || wire.channel !== OPENCHAMBER_SDK_CHANNEL || wire.v !== OPENCHAMBER_SDK_API_VERSION)
+    const wire2 = asWireRecord(data);
+    if (!wire2 || wire2.channel !== OPENCHAMBER_SDK_CHANNEL || wire2.v !== OPENCHAMBER_SDK_API_VERSION)
       return null;
-    if (wire.type === "result")
-      return readResultMessage(wire);
-    if (!HOST_PUSH_TYPES.has(String(wire.type)) || Object(wire.payload) !== wire.payload)
+    if (wire2.type === "result")
+      return readResultMessage(wire2);
+    if (!HOST_PUSH_TYPES.has(String(wire2.type)) || Object(wire2.payload) !== wire2.payload)
       return null;
-    return wire;
+    return wire2;
   };
 
   // node_modules/@openchamber/sdk/dist/host.js
@@ -716,23 +716,23 @@
               payload
             });
         };
-        const fail = (text) => answer({ error: (text.trim() || "Could not read the edited file.").slice(0, GUEST_RESOLVE_ERROR_MAX) });
+        const fail2 = (text) => answer({ error: (text.trim() || "Could not read the edited file.").slice(0, GUEST_RESOLVE_ERROR_MAX) });
         const handler = fileSnapshotHandler;
         if (!handler) {
-          fail("This extension does not edit files.");
+          fail2("This extension does not edit files.");
           return;
         }
         Promise.resolve().then(() => handler(message.payload.purpose)).then((snapshot) => {
           if (fileEditorPayloadSize(snapshot) > GUEST_FILE_EDITOR_CONTENT_MAX) {
-            fail(`The file is over ${GUEST_FILE_EDITOR_CONTENT_MAX} ${"bytes" in snapshot ? "bytes" : "characters"}.`);
+            fail2(`The file is over ${GUEST_FILE_EDITOR_CONTENT_MAX} ${"bytes" in snapshot ? "bytes" : "characters"}.`);
             return;
           }
           if (snapshot.version.length > GUEST_FILE_EDITOR_VERSION_MAX) {
-            fail(`The snapshot version is over ${GUEST_FILE_EDITOR_VERSION_MAX} characters.`);
+            fail2(`The snapshot version is over ${GUEST_FILE_EDITOR_VERSION_MAX} characters.`);
             return;
           }
           answer({ snapshot: "bytes" in snapshot ? { bytes: snapshot.bytes, version: snapshot.version } : { content: snapshot.content, version: snapshot.version } });
-        }, (error) => fail(error instanceof Error ? error.message : String(error)));
+        }, (error) => fail2(error instanceof Error ? error.message : String(error)));
         return;
       }
       if (message.type === "resolve") {
@@ -1583,48 +1583,204 @@
 
   // panel/src/main.js
   var host = connectHost();
-  var el = {
-    dot: document.getElementById("dot"),
-    host: document.getElementById("hostState"),
-    service: document.getElementById("serviceState"),
-    retry: document.getElementById("retry")
+  var $ = (id) => document.getElementById(id);
+  var STORAGE_KEY = "plane.project";
+  var state = {
+    phase: "boot",
+    // boot | nohost | setup | loading | list | empty | error
+    config: null,
+    projects: [],
+    selected: null,
+    error: null
   };
-  var readyTimer = null;
-  function setState(hostOk) {
-    el.dot.className = hostOk ? "dot on" : "dot";
-    el.host.textContent = hostOk ? "\u5DF2\u8FDE\u63A5" : "\u672A\u8FDE\u63A5\uFF08\u4E0D\u5728 OpenChamber \u91CC\uFF09";
-  }
-  async function refreshService() {
-    el.service.textContent = "\u68C0\u6D4B\u4E2D\u2026";
+  async function callService(path, { method = "POST", body } = {}) {
+    const res = await host.serviceRequest({
+      method,
+      path,
+      body: body === void 0 ? void 0 : JSON.stringify(body)
+    });
+    let data = null;
     try {
-      const status = await host.serviceStatus();
-      const label = {
-        ready: "\u5C31\u7EEA",
-        starting: "\u542F\u52A8\u4E2D",
-        stopped: "\u672A\u542F\u52A8",
-        failed: "\u542F\u52A8\u5931\u8D25"
-      }[status] || String(status);
-      el.service.textContent = label;
-    } catch (err) {
-      el.service.textContent = "\u4E0D\u53EF\u7528";
+      data = JSON.parse(res.body);
+    } catch {
+    }
+    if (res.status >= 400 || !data || data.ok === false) {
+      const info = data?.error || { code: "UNKNOWN", message: `service \u8FD4\u56DE ${res.status}` };
+      const err = new Error(info.message || "\u672A\u77E5\u9519\u8BEF");
+      err.code = info.code || "UNKNOWN";
+      err.missing = info.missing;
+      throw err;
+    }
+    return data;
+  }
+  async function boot() {
+    setPhase("boot");
+    try {
+      const { config } = await callService("/config", { method: "GET" });
+      state.config = config;
+      rememberProject(await readStoredProject());
+      if (!config.configured) return setPhase("setup");
+      await loadProjects();
+    } catch (e) {
+      fail(e);
     }
   }
-  function onReady() {
-    clearTimeout(readyTimer);
-    setState(true);
-    refreshService();
+  async function loadProjects() {
+    setPhase("loading");
+    try {
+      const { projects } = await callService("/projects");
+      state.projects = projects;
+      if (!projects.length) return setPhase("empty");
+      if (!projects.some((p) => p.id === state.selected)) {
+        state.selected = projects[0].id;
+        await storeProject(state.selected);
+      }
+      setPhase("list");
+    } catch (e) {
+      fail(e);
+    }
   }
+  async function saveConfig(form) {
+    try {
+      const { config } = await callService("/config", {
+        body: {
+          baseUrl: form.baseUrl.value,
+          apiKey: form.apiKey.value,
+          workspace: form.workspace.value,
+          apiVersion: form.apiVersion.value
+        }
+      });
+      state.config = config;
+      state.error = null;
+      if (!config.configured) {
+        state.error = { code: "CONFIG_MISSING", message: "\u8FD8\u7F3A\u5B57\u6BB5\uFF0C\u4E09\u4E2A\u5FC5\u586B\u90FD\u8981\u586B" };
+        return setPhase("setup");
+      }
+      await loadProjects();
+    } catch (e) {
+      fail(e);
+    }
+  }
+  function fail(e) {
+    state.error = { code: e.code || "UNKNOWN", message: e.message };
+    if (e.code === "CONFIG_MISSING" || e.code === "BAD_CONFIG") setPhase("setup");
+    else setPhase("error");
+  }
+  async function readStoredProject() {
+    try {
+      const got = await host.storage.get(STORAGE_KEY);
+      return typeof got === "string" ? got : got?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async function storeProject(id) {
+    try {
+      await host.storage.set(STORAGE_KEY, id);
+    } catch {
+    }
+  }
+  function rememberProject(id) {
+    if (id) state.selected = id;
+  }
+  function setPhase(phase) {
+    state.phase = phase;
+    render();
+  }
+  var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function render() {
+    $("dot").className = state.phase === "list" || state.phase === "empty" ? "dot on" : "dot";
+    $("hostState").textContent = state.phase === "nohost" ? "\u672A\u8FDE\u63A5" : "\u5DF2\u8FDE\u63A5";
+    const proj = $("proj");
+    proj.hidden = state.phase !== "list";
+    proj.innerHTML = state.projects.map((p) => `<option value="${ESC(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC(p.name)}</option>`).join("");
+    $("view").innerHTML = viewFor(state.phase);
+    wire();
+  }
+  function viewFor(phase) {
+    const c = state.config || {};
+    const err = state.error;
+    if (phase === "boot" || phase === "loading") {
+      return `<div class="hint">${phase === "boot" ? "\u6B63\u5728\u8FDE\u63A5 Plane\u2026" : "\u6B63\u5728\u62C9\u9879\u76EE\u5217\u8868\u2026"}</div>`;
+    }
+    if (phase === "nohost") {
+      return `<div class="empty"><div class="t">\u4E0D\u5728 OpenChamber \u91CC</div>
+      <div>\u9762\u677F\u8981\u901A\u8FC7\u5BBF\u4E3B\u624D\u80FD\u8BBF\u95EE\u672C\u5730 service\u3002\u88C5\u8FDB OpenChamber \u540E\u518D\u6253\u5F00\u8FD9\u4E2A\u9762\u677F\u3002</div></div>`;
+    }
+    if (phase === "setup") {
+      return `<form id="setupForm" class="form" autocomplete="off">
+      <div class="t">\u8FDE\u63A5 Plane</div>
+      ${err ? `<div class="err">${ESC(err.code)}\uFF1A${ESC(err.message)}</div>` : ""}
+      <label>\u5730\u5740<input name="baseUrl" placeholder="http://192.168.1.188:8080" value="${ESC(c.baseUrl || "")}"></label>
+      <label>API Key<input name="apiKey" type="password" placeholder="${c.hasKey ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u5219\u4E0D\u53D8" : "plane_api_\u2026"}" value=""></label>
+      <label>Workspace<input name="workspace" placeholder="g2" value="${ESC(c.workspace || "")}"></label>
+      <label>API \u7248\u672C<input name="apiVersion" list="versions" placeholder="v1 \u6216 v2" value="${ESC(c.apiVersion || "v2")}">
+        <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
+      <button type="submit">\u4FDD\u5B58\u5E76\u8FDE\u63A5</button>
+      <div class="fine">Key \u5B58\u5728\u6269\u5C55\u81EA\u5DF1\u7684\u6570\u636E\u76EE\u5F55\uFF08600 \u6743\u9650\uFF09\uFF0C\u9762\u677F\u53EA\u62FF\u5230\u8131\u654F\u89C6\u56FE\u3002</div>
+    </form>`;
+    }
+    if (phase === "error") {
+      const retry = err?.code === "NETWORK" ? `<button data-act="retry">\u91CD\u8BD5</button>` : "";
+      return `<div class="empty"><div class="t">\u8FDE\u4E0D\u4E0A Plane</div>
+      <div class="err">${ESC(err?.code || "")}\uFF1A${ESC(err?.message || "")}</div>
+      <div class="acts">${retry}<button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
+    }
+    if (phase === "empty") {
+      return `<div class="empty"><div class="t">\u8FD9\u4E2A workspace \u8FD8\u6CA1\u6709\u9879\u76EE</div>
+      <div>\u53BB Plane \u91CC\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u6216\u8005\u5728\u4E0A\u9762\u7684\u4E0B\u62C9\u91CC\u6362 workspace \u5BF9\u5E94\u914D\u7F6E\u3002</div>
+      <div class="acts"><button data-act="retry">\u5237\u65B0</button><button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
+    }
+    const current = state.projects.find((p) => p.id === state.selected);
+    return `<div class="list">${state.projects.map(
+      (p) => `<button class="row${p.id === state.selected ? " sel" : ""}" data-pick="${ESC(p.id)}">
+        <span class="nm">${ESC(p.name)}</span>
+        <span class="idf">${ESC(p.identifier || "")}</span>
+      </button>`
+    ).join("")}</div>
+    <div class="fine">${state.projects.length} \u4E2A\u9879\u76EE \xB7 \u5F53\u524D <b>${ESC(current?.name || "")}</b> \xB7 \u770B\u677F\u5728 03 \u7247</div>`;
+  }
+  function wire() {
+    const form = $("setupForm");
+    if (form) {
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        saveConfig({
+          baseUrl: form.baseUrl,
+          apiKey: form.apiKey,
+          workspace: form.workspace,
+          apiVersion: form.apiVersion
+        });
+      });
+    }
+    document.querySelectorAll("[data-act]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const act = el.dataset.act;
+        if (act === "retry") return loadProjects();
+        if (act === "setup") return setPhase("setup");
+      });
+    });
+    document.querySelectorAll("[data-pick]").forEach((el) => {
+      el.addEventListener("click", async () => {
+        state.selected = el.dataset.pick;
+        await storeProject(state.selected);
+        render();
+      });
+    });
+  }
+  $("proj").addEventListener("change", async (e) => {
+    state.selected = e.target.value;
+    await storeProject(state.selected);
+    render();
+  });
+  $("refresh").addEventListener("click", () => loadProjects());
+  var ready = false;
   host.onReady((ctx) => {
+    ready = true;
     document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
-    onReady();
+    boot();
   });
-  host.onConnection?.((connection) => {
-    setState(Boolean(connection?.connected));
-  });
-  el.retry.addEventListener("click", () => {
-    refreshService();
-  });
-  setState(false);
-  refreshService();
-  readyTimer = setTimeout(() => setState(false), 1200);
+  setTimeout(() => {
+    if (!ready) setPhase("nohost");
+  }, 1500);
 })();

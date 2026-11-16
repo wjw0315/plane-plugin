@@ -12,13 +12,18 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 
 ## 现在到哪了
 
-**第 01 片（骨架）**：面板能装出来、跟宿主握手、本地 service 按契约应答 `/health`。看板与 Plane 连接是 02 片。
+- **01 骨架**（完成）：面板能装出来、跟宿主握手、service 按契约应答 `/health`
+- **02 连接与配置**（完成）：面板内配置表单 → 列项目 → 三种错误面 → 记住项目
+- 03 起：列式看板、拖拽改状态
 
 ## 安装
 
 1. 设置 → 扩展 → 添加文件夹 → 选 **`plane-plugin/openchamber`**（不是仓库根）
 2. 在权限对话框里允许**本地 service**（这一片的 service 只做 `/health`）
-3. rail 出现 Plane 面板；面板底部能看到「宿主 / service」两个状态
+3. rail 出现 Plane 面板；底部显示「宿主 已连接」
+4. 面板里填 4 个字段（地址 / API Key / workspace / API 版本）→ 保存并连接 → 看到项目列表
+
+> **配置写在面板里，不用 Settings → Integrations。** 平台的 `contributes.integration` 要求 `token.apiOrigin` 是 **https**（实测 http 直接被 schema 拒），自托管 Plane 常常是局域网 http，填不进去。所以配置走面板表单，落在 service 的数据目录 `config.json`（600 权限，gitignore 之外），面板只拿脱敏视图（有没有 Key、地址、workspace），拿不到 Key 本身。
 
 > 文件夹安装从原目录运行：改完代码 `npm run build`，再在面板里重载即可，不用重装。
 > 换成 zip / git 安装时只发构建产物（`panel/main.js`、`service/main.cjs`），宿主不会编译。
@@ -43,7 +48,18 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `panel/main.js` | 面板产物：esbuild 打的 IIFE，**要提交**（宿主不编译、iframe 不能加载 ESM） |
 | `service/src/main.js` | service 源码（Node） |
 | `service/main.cjs` | service 产物：esbuild 打的 CJS，**要提交**（`.js` 会被 `"type": "module"` 当成 ESM） |
-| `test/smoke.mjs` | 不依赖 OpenChamber 的冒烟测试 |
+| `test/smoke.mjs` | 不依赖 OpenChamber 的冒烟测试（含假 Plane） |
+
+## service 路由
+
+| 路由 | 说明 |
+| --- | --- |
+| `GET /health` | 就绪探针，宿主轮询到 200 才算 ready |
+| `GET /config` | 脱敏配置视图（`configured` / `baseUrl` / `workspace` / `apiVersion` / `hasKey`） |
+| `POST /config` | 保存配置；允许分步填，只在真正调 Plane 时要求完整 |
+| `POST /projects` | 用已存配置列项目（v1/v2 分支在这一层） |
+
+错误码：`CONFIG_MISSING`(400) / `BAD_CONFIG`(400) / `AUTH_FAILED`(401) / `NOT_FOUND`(404) / `RATE_LIMITED`(429) / `NETWORK`(502)。`NETWORK` 与 `RATE_LIMITED` 在 service 内重试一次。
 
 ## 契约要点
 
@@ -57,3 +73,5 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 
 - `service/main.js` 会被 `"type": "module"` 当 ESM，而 esbuild 产出的是 CJS → 必须用 `.cjs` 后缀，否则宿主拉起即 `require is not defined`。
 - manifest 里 `contributes.panel.id` 会被顶层 `id` 覆盖（SDK 解析器行为），两者写成同一个值，免得后人读懵。
+- `contributes.integration` 只接受 **https** 的 `token.apiOrigin`，局域网 http 的 Plane 用不了那张卡片（见上面安装说明）。
+- `esbuild` 要固定版本：0.25 与 0.28 打出来的产物差一行 `"use strict"`，不锁会让产物在两次安装之间来回变。

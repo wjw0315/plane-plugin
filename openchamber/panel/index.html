@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0d0f12; --panel:#121519; --card:#171b20; --line:#252b33; --line2:#2f3742;
-    --fg:#e6e9ee; --fg2:#9aa4b2; --fg3:#6b7482; --ok:#4ade80; --warn:#fbbf24;
+    --fg:#e6e9ee; --fg2:#9aa4b2; --fg3:#6b7482; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
   }
   body[data-theme="light"]{
     --bg:#fff; --panel:#f7f8fa; --card:#fff; --line:#e5e7eb; --line2:#d1d5db;
@@ -28,18 +28,37 @@
   .dot{width:6px;height:6px;border-radius:50%;background:var(--fg3);flex:0 0 6px}
   .dot.on{background:var(--ok)}
   .grow{flex:1}
-  main{flex:1;min-height:0;overflow:auto;padding:16px 12px}
-  .empty{border:1px dashed var(--line2);border-radius:12px;padding:18px 14px;text-align:center;color:var(--fg2)}
+  header select{appearance:none;background:var(--card);border:1px solid var(--line2);color:var(--fg2);
+    border-radius:6px;font-size:11px;padding:2px 6px;max-width:140px}
+  header button{background:var(--card);border:1px solid var(--line2);color:var(--fg2);border-radius:6px;
+    font-size:11px;padding:2px 7px;cursor:pointer}
+  header button:hover{color:var(--fg)}
+  main{flex:1;min-height:0;overflow:auto;padding:12px}
+  .hint{color:var(--fg3);font-size:12px;text-align:center;padding:24px 8px}
+  .empty{border:1px dashed var(--line2);border-radius:12px;padding:16px 14px;text-align:center;color:var(--fg2);font-size:11.5px}
   .empty .t{font-size:12.5px;color:var(--fg);margin-bottom:6px}
-  .empty .steps{font-size:11.5px;line-height:1.75;text-align:left;margin:10px auto 0;max-width:260px;color:var(--fg3)}
-  .empty code{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:0 4px;font-size:10.5px}
+  .err{margin:8px 0;color:var(--err);font-size:11px;line-height:1.6;word-break:break-word}
+  .acts{display:flex;gap:6px;justify-content:center;margin-top:10px}
+  .acts button,.form button{background:var(--card);border:1px solid var(--line2);color:var(--fg2);
+    border-radius:7px;font-size:11px;padding:4px 10px;cursor:pointer}
+  .acts button:hover,.form button:hover{color:var(--fg)}
+  .form button[type=submit]{background:#1d2733;border-color:#3b5163;color:#dbe6f0}
+  .form{display:flex;flex-direction:column;gap:9px}
+  .form .t{font-size:12.5px;margin-bottom:2px}
+  .form label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--fg3)}
+  .form input{background:var(--card);border:1px solid var(--line2);border-radius:7px;color:var(--fg);
+    font-size:12px;padding:5px 7px}
+  .form input::placeholder{color:var(--fg3)}
+  .fine{color:var(--fg3);font-size:10.5px;line-height:1.6;margin-top:4px}
+  .list{display:flex;flex-direction:column;gap:5px}
+  .row{display:flex;align-items:center;gap:8px;text-align:left;background:var(--card);
+    border:1px solid var(--line);border-radius:9px;padding:8px 10px;color:var(--fg2);cursor:pointer;font:inherit}
+  .row:hover{border-color:var(--line2);color:var(--fg)}
+  .row.sel{border-color:#3b5163;background:#141c25}
+  .row .nm{font-size:12px;color:var(--fg);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .idf{font-size:10.5px;color:var(--fg3);font-variant-numeric:tabular-nums}
   footer{display:flex;align-items:center;gap:6px;padding:7px 12px;border-top:1px solid var(--line);
     font-size:11px;color:var(--fg3);background:var(--panel)}
-  footer .k{color:var(--fg3)}
-  footer .v{color:var(--fg2)}
-  footer button{margin-left:auto;background:var(--card);border:1px solid var(--line2);color:var(--fg2);
-    border-radius:6px;font-size:10.5px;padding:2px 7px;cursor:pointer}
-  footer button:hover{color:var(--fg)}
 </style>
 </head>
 <body data-theme="dark">
@@ -47,22 +66,14 @@
     <span class="dot" id="dot"></span>
     <h1>Plane</h1>
     <span class="grow"></span>
+    <select id="proj" hidden></select>
+    <button id="refresh" type="button" title="重新拉取">↻</button>
   </header>
-  <main>
-    <div class="empty">
-      <div class="t">还没接上 Plane</div>
-      <div>这一片只搭骨架，看板在下一片接。</div>
-      <div class="steps">
-        1. 设置 → 扩展 → Plane → 允许本地 service<br>
-        2. Integrations 卡片里填 <code>地址</code> / <code>API Key</code> / <code>workspace</code><br>
-        3. 回到这个面板
-      </div>
-    </div>
-  </main>
+  <main id="view"></main>
   <footer>
-    <span class="k">宿主</span><span class="v" id="hostState">—</span>
-    <span class="k">· service</span><span class="v" id="serviceState">—</span>
-    <button id="retry" type="button">重试</button>
+    <span>宿主</span><span id="hostState">—</span>
+    <span class="grow"></span>
+    <span>配置存在扩展数据目录</span>
   </footer>
   <script src="./main.js"></script>
 </body>
