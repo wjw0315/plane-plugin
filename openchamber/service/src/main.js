@@ -15,12 +15,13 @@
  *   POST /work-items 列工作项（可按 stateId 过滤）
  *   POST /work-item   取单条工作项 + 描述（详情用）
  *   POST /patch-state 改工作项状态
+ *   POST /comment     结论回填（追加评论，不改描述）
  *   POST /session-start 由 service 发起会话（可指定 model/variant/agent、可先建 worktree）
  *   POST /bind-session 给工作项追加 oc-<sessionId> 标签（可顺带推状态）
  */
 import http from "node:http";
 import { loadConfig, saveConfig, maskConfig } from "./config.js";
-import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, PlaneError } from "./plane.js";
+import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, getWorkItem, ensureLabel, patchWorkItem, addComment, PlaneError } from "./plane.js";
 import { startSession } from "./session.js";
 
 const PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
@@ -155,6 +156,17 @@ const server = http.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const item = await patchState(cfg, body.projectId, body.workItemId, body.stateId);
       sendJson(res, 200, { ok: true, item });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/comment") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId || !String(body.body || "").trim()) {
+        throw new PlaneError("BAD_CONFIG", "comment 需要 projectId / workItemId / body");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const comment = await addComment(cfg, body.projectId, body.workItemId, body.body, { sessionId: body.sessionId });
+      sendJson(res, 200, { ok: true, comment });
       return;
     }
 

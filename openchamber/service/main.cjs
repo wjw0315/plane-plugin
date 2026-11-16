@@ -3700,6 +3700,25 @@ async function patchWorkItem(cfg, projectId, workItemId, patch, fetchImpl = fetc
   );
   return mapItem(data);
 }
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+function textToCommentHtml(text, { sessionId } = {}) {
+  const body = String(text || "").trim().split(/\n{2,}/).map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`).join("");
+  const head = sessionId ? `<p><em>\uFF08\u6765\u81EA OpenChamber \u4F1A\u8BDD <code>${escapeHtml(sessionId)}</code>\uFF09</em></p>` : "";
+  return head + body;
+}
+async function addComment(cfg, projectId, workItemId, text, { sessionId } = {}, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/comments/`,
+    { method: "POST", body: { comment_html: textToCommentHtml(text, { sessionId }) }, fetchImpl }
+  );
+  return {
+    id: String(data?.uuid ?? data?.id ?? ""),
+    createdAt: data?.created_at ? String(data.created_at) : (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 
 // service/src/session.js
 var import_node_child_process = require("node:child_process");
@@ -3866,6 +3885,16 @@ var server = import_node_http.default.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const item = await patchState(cfg, body.projectId, body.workItemId, body.stateId);
       sendJson(res, 200, { ok: true, item });
+      return;
+    }
+    if (req.method === "POST" && path === "/comment") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId || !String(body.body || "").trim()) {
+        throw new PlaneError("BAD_CONFIG", "comment \u9700\u8981 projectId / workItemId / body");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const comment = await addComment(cfg, body.projectId, body.workItemId, body.body, { sessionId: body.sessionId });
+      sendJson(res, 200, { ok: true, comment });
       return;
     }
     if (req.method === "POST" && path === "/session-start") {

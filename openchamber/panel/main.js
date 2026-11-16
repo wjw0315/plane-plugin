@@ -1631,6 +1631,7 @@
       ${p.label ? `<span class="chip ${p.cls}">${p.label}</span>` : ""}
       ${initial ? `<span class="avatar">${ESC(initial)}</span>` : ""}
       <span class="grow"></span>
+      ${item.concl ? `<span class="chip ok" title="\u5DF2\u56DE\u586B\u7ED3\u8BBA">\u2713 \u7ED3\u8BBA</span>` : ""}
       ${item.sess ? `<span class="chip sess">\u2318 \u4F1A\u8BDD</span>` : ""}
     </div>
   </article>`;
@@ -2036,7 +2037,7 @@
     if (phase === "board") {
       const detailId = state.detail?.id ?? null;
       const base = state.view === "list" ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "") : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
-      return base + (state.drawer ? drawerHTML() : "");
+      return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "");
     }
     return "";
   }
@@ -2056,6 +2057,9 @@
     <div class="frow"><span class="k">\u6307\u6D3E</span><span>${ESC2(item.assignees?.map((a) => a.name).filter(Boolean).join("\u3001") || "\u672A\u6307\u6D3E")}</span></div>
     <div class="frow"><span class="k">\u6807\u7B7E</span><span>${item.labels?.length ? item.labels.length + " \u4E2A" : "\u65E0"}</span></div>
     <div class="frow"><span class="k">\u4F1A\u8BDD</span>${item.sess ? `<span class="chip sess">\u2318 ${ESC2(item.sess)}</span>` : `<button class="btn" data-start-session="${ESC2(item.id)}">\u53D1\u8D77\u4F1A\u8BDD</button>`}</div>
+    <div class="sec"><h4>\u7ED3\u8BBA</h4>${item.concl ? `<div class="desc">${ESC2(item.conclText || "")}</div>
+           <div class="fine">\u2713 \u5DF2\u56DE\u586B\u5230 Plane \u8BC4\u8BBA \xB7 ${ESC2(item.conclAt || "")}</div>` : `<div class="fine">${item.sess ? "\u4F1A\u8BDD\u8DD1\u5B8C\u540E\u53EF\u4EE5\u628A\u7ED3\u8BBA\u5199\u56DE\u8FD9\u5F20\u5361\u3002" : "\u8FD8\u6CA1\u6709\u7ED3\u8BBA\u3002"}</div>
+           <div class="acts" style="margin-top:8px"><button class="btn" data-backfill="${ESC2(item.id)}">\u56DE\u586B\u7ED3\u8BBA\u2026</button></div>`}</div>
     <div class="sec"><h4>\u63CF\u8FF0</h4>${desc}</div>
     <div class="acts">
       <button class="btn pri" data-plane="${ESC2(item.id)}">\u5728 Plane \u6253\u5F00 \u2197</button>
@@ -2217,6 +2221,61 @@
       <div class="fine">\u9009\u4E86\u4E09\u4EF6\u5957\u6216 worktree \u8D70 service\uFF08\u80FD\u6307\u5B9A\u6A21\u578B\uFF09\uFF1B\u90FD\u4E0D\u6539\u5219\u8D70\u5BBF\u4E3B startSession\uFF08\u66F4\u8F7B\uFF09\u3002</div>
     </div></div>`;
   }
+  function openConcl(itemId) {
+    const item = state.board.items.find((i) => i.id === itemId);
+    if (!item) return;
+    state.concl = { itemId, text: item.conclText || "", busy: false, error: null };
+    render();
+  }
+  function closeConcl() {
+    state.concl = null;
+    render();
+  }
+  async function submitConcl() {
+    const c = state.concl;
+    const item = state.board.items.find((i) => i.id === c.itemId);
+    if (!c || !item || c.busy) return;
+    const text = String(c.text || "").trim();
+    if (!text) {
+      c.error = { code: "EMPTY", message: "\u8349\u7A3F\u662F\u7A7A\u7684" };
+      return render();
+    }
+    c.busy = true;
+    c.error = null;
+    render();
+    try {
+      const { comment } = await callService("/comment", {
+        body: { projectId: state.selected, workItemId: item.id, body: text, sessionId: item.sess || void 0 }
+      });
+      item.concl = true;
+      item.conclText = text;
+      item.conclAt = (comment?.createdAt || "").slice(0, 16).replace("T", " ") || "\u521A\u521A";
+      state.concl = null;
+      render();
+      showToast("\u5DF2\u5199\u5165 Plane \u8BC4\u8BBA");
+    } catch (e) {
+      c.busy = false;
+      c.error = { code: e.code || "COMMENT_FAILED", message: e.message || String(e) };
+      render();
+    }
+  }
+  function conclHTML() {
+    const c = state.concl;
+    const item = state.board.items.find((i) => i.id === c.itemId);
+    return `<div class="overlay"><div class="dhead">
+      <button class="back" data-concl-close="1" title="\u8FD4\u56DE">\u2039</button>
+      <span class="ident">\u56DE\u586B\u7ED3\u8BBA \xB7 XLMSC-${ESC2(item?.identifier || c.itemId)}</span>
+      <span class="grow"></span><span class="fine">Esc \u8FD4\u56DE</span></div>
+    <div class="dbody">
+      <div class="fine">\u4F5C\u4E3A\u8BC4\u8BBA\u8FFD\u52A0\u5230 Plane\uFF0C\u4E0D\u6539\u52A8\u539F\u63CF\u8FF0\u3002</div>
+      ${c.error ? `<div class="err">${ESC2(c.error.code)}\uFF1A${ESC2(c.error.message)}</div>` : ""}
+      <textarea id="conclText" style="height:120px;margin-top:8px" placeholder="\u6539\u4E86\u4EC0\u4E48\u3001\u600E\u4E48\u9A8C\u8BC1\u3001\u9057\u7559\u4EC0\u4E48\u2026">${ESC2(c.text)}</textarea>
+      <div class="acts">
+        <button class="btn pri" data-concl-go="1"${c.busy || !String(c.text || "").trim() ? " disabled" : ""}>${c.busy ? "\u5199\u5165\u4E2D\u2026" : "\u5199\u5165\u8BC4\u8BBA"}</button>
+        <button class="btn" data-concl-close="1">\u53D6\u6D88</button>
+      </div>
+    </div></div>`;
+  }
   function wire() {
     const form = $("setupForm");
     if (form) {
@@ -2256,6 +2315,24 @@
     document.querySelectorAll("[data-drawer-close]").forEach((el) => {
       el.addEventListener("click", () => closeDrawer());
     });
+    document.querySelectorAll("[data-backfill]").forEach((el) => {
+      el.addEventListener("click", () => openConcl(el.dataset.backfill));
+    });
+    document.querySelectorAll("[data-concl-close]").forEach((el) => {
+      el.addEventListener("click", () => closeConcl());
+    });
+    const conclGo = document.querySelector("[data-concl-go]");
+    if (conclGo) conclGo.addEventListener("click", () => submitConcl());
+    const conclText = $("conclText");
+    if (conclText) {
+      conclText.addEventListener("input", () => {
+        const c = state.concl;
+        if (!c) return;
+        c.text = conclText.value;
+        const go2 = document.querySelector("[data-concl-go]");
+        if (go2) go2.disabled = !conclText.value.trim() || c.busy;
+      });
+    }
     const go = document.querySelector("[data-drawer-go]");
     if (go) {
       go.addEventListener("click", () => {
@@ -2324,6 +2401,11 @@
     }
   }
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.concl) {
+      e.preventDefault();
+      closeConcl();
+      return;
+    }
     if (e.key === "Escape" && state.drawer) {
       e.preventDefault();
       closeDrawer();

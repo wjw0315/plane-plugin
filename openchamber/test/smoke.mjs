@@ -51,7 +51,7 @@ async function checkManifest() {
 
 /* ---------------- 假 Plane ---------------- */
 
-const plane = { mode: "ok", hits: 0, patches: [], labels: [] };
+const plane = { mode: "ok", hits: 0, patches: [], labels: [], comments: [] };
 const host = { starts: [] };
 const fakePlane = http.createServer((req, res) => {
   plane.hits++;
@@ -66,6 +66,16 @@ const fakePlane = http.createServer((req, res) => {
   if (req.headers["x-api-key"] !== "test-key") return json(401, { error: "no key" });
   if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/") {
     return json(200, { results: [{ id: "p1", name: "xlm-scrm", identifier: "XLMSC" }, { id: "p2", name: "内部", identifier: "IN" }] });
+  }
+  if (req.method === "POST" && path === "/api/v1/workspaces/g2/projects/p1/issues/i1/comments/") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const body = JSON.parse(raw || "{}");
+      plane.comments.push(body);
+      json(201, { id: "cm-1", created_at: "2026-11-16T10:30:00Z", comment_html: body.comment_html });
+    });
+    return;
   }
   if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/p1/labels/") {
     return json(200, { results: plane.labels });
@@ -324,6 +334,29 @@ try {
     Array.isArray(bindPatch.labels) && bindPatch.labels.length === 1 && bindPatch.state === "s3",
     JSON.stringify(bindPatch),
   );
+
+  /* ---------------- 07 片：手动回填结论 ---------------- */
+
+  plane.mode = "ok";
+  plane.comments = [];
+  const commented = await call("/comment", {
+    method: "POST",
+    body: { projectId: "p1", workItemId: "i1", body: "已补两列。\n\n验证：3 个月样本通过。", sessionId: "ses_test" },
+  });
+  check("回填评论成功", commented.status === 200 && commented.body?.comment?.id === "cm-1", JSON.stringify(commented.body).slice(0, 160));
+  const html = plane.comments[0]?.comment_html || "";
+  check(
+    "评论 HTML 带会话来源与分段",
+    html.includes("ses_test") && html.includes("<p>已补两列。</p>") && html.includes("<p>验证：3 个月样本通过。</p>"),
+    html.slice(0, 220),
+  );
+
+  const emptyComment = await call("/comment", { method: "POST", body: { projectId: "p1", workItemId: "i1", body: "   " } });
+  check("空草稿 → BAD_CONFIG", emptyComment.status === 400 && emptyComment.body?.error?.code === "BAD_CONFIG");
+
+  plane.mode = "unauthorized";
+  const deniedComment = await call("/comment", { method: "POST", body: { projectId: "p1", workItemId: "i1", body: "x" } });
+  check("Plane 401 → AUTH_FAILED", deniedComment.status === 401 && deniedComment.body?.error?.code === "AUTH_FAILED");
 
   plane.mode = "ok";
   const badUrl = await call("/config", {

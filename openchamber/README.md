@@ -18,7 +18,8 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 - **04 双视图**（完成）：面板头部「列 / 列表」切换，选择记在宿主 storage（`plane.view`）；列表视图纵向分组 + 「移动到」下拉，切换不重拉数据
 - **05 任务详情**（完成）：点卡片开详情（列视图=覆盖页、列表视图=就地展开），字段含状态/编号/优先级/指派/标签/会话/描述；详情里可切状态、在 Plane 打开、复制链接；Esc / 返回 / 收起关闭
 - **06 发起会话**（完成）：详情里「发起会话」开参数抽屉（项目 / 全新 worktree / 模型 / 思考级别 / 智能体 / 补充提示词 + prompt 预览）；默认走宿主 `startSession`，选了三件套或 worktree 走 service `sessions.start`（可先 `git worktree add`）；成功后打 `oc-<sessionId>` 标签并推 In Progress
-- 07 起：手动回填结论（草稿 → 评论 → ✓ 标记）
+- **07 手动回填结论**（完成）：详情「回填结论…」开草稿抽屉，写入 `POST /comment`（纯文本转 HTML，首行标来源会话），成功后卡片与详情出现「✓ 结论」；失败保留草稿可重试；只追加评论不改描述
+- 08 起：自动回填（订阅会话事件）
 
 ## 安装
 
@@ -53,7 +54,7 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `service/src/main.js` | service 源码（Node） |
 | `service/main.cjs` | service 产物：esbuild 打的 CJS，**要提交**（`.js` 会被 `"type": "module"` 当成 ESM） |
 | `test/smoke.mjs` | 不依赖 OpenChamber 的冒烟测试（含假 Plane） |
-| `test/host-harness.html` | **假宿主**：把面板放进 iframe、按 SDK 协议应答，用来在浏览器里手动点面板（`python3 -m http.server` 起在本目录，开 `/test/host-harness.html`，用面板上方两个按钮填值 + 点保存） |
+| `test/host-harness.html` | **假宿主**（不 import SDK，常量照抄，避免 30 多个模块偶尔加载卡住）：把面板放进 iframe、按 SDK 协议应答，用来在浏览器里手动点面板（`python3 -m http.server` 起在本目录，开 `/test/host-harness.html`，用面板上方两个按钮填值 + 点保存） |
 
 ## service 路由
 
@@ -69,6 +70,7 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `POST /patch-state` | 改工作项状态（拖拽落列 / 详情里切） |
 | `POST /session-start` | 由 service 发起会话（可指定 model/variant/agent；需要时先建 worktree） |
 | `POST /bind-session` | 给工作项追加 `oc-<sessionId>` 标签（可顺带推状态） |
+| `POST /comment` | 结论回填：纯文本 → 评论 HTML（分段 + 来源会话），追加到工作项 |
 
 错误码：`CONFIG_MISSING`(400) / `BAD_CONFIG`(400) / `AUTH_FAILED`(401) / `NOT_FOUND`(404) / `RATE_LIMITED`(429) / `NETWORK`(502)。`NETWORK` 与 `RATE_LIMITED` 在 service 内重试一次。
 

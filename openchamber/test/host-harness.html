@@ -30,6 +30,7 @@
       <button id="openCard">6. 打开第一张卡详情</button>
       <button id="esc">7. Esc 关闭详情</button>
       <button id="startSess">8. 发起会话（默认路径）</button>
+      <button id="backfill">9. 回填结论</button>
     </div>
     <iframe id="panel" src="../panel/index.html" style="height:calc(100% - 34px)"></iframe>
   </div>
@@ -49,10 +50,10 @@ window.addEventListener("error", function (e) { paintErr("error: " + (e.message 
 window.addEventListener("unhandledrejection", function (e) { paintErr("rejection: " + (e.reason && e.reason.message || e.reason)); });
 </script>
 <script type="module">
-import { EMPTY_GUEST_CONNECTION, OPENCHAMBER_SDK_CHANNEL, OPENCHAMBER_SDK_API_VERSION } from "../node_modules/@openchamber/sdk/dist/index.js";
-
-const CHANNEL = OPENCHAMBER_SDK_CHANNEL;
-const V = OPENCHAMBER_SDK_API_VERSION;
+// 不 import SDK：那 30 多个模块的加载偶尔会卡住，静态常量照抄即可
+const CHANNEL = "openchamber.sdk";
+const V = 1;
+const EMPTY_GUEST_CONNECTION = { connected: true, account: "harness" };
 const logEl = document.getElementById("log");
 const frame = document.getElementById("panel");
 
@@ -108,6 +109,11 @@ function routeService(p) {
   if (path === "/config" && p.method === "POST") {
     fake.configured = true;
     return { status: 200, body: JSON.stringify({ ok: true, config: { configured: true, baseUrl: "http://192.168.1.188:8080", workspace: "g2", apiVersion: "v1", hasKey: true } }) };
+  }
+  if (path === "/comment") {
+    const body = JSON.parse(p.body || "{}");
+    fake.lastComment = body;
+    return { status: 200, body: JSON.stringify({ ok: true, comment: { id: "cm-h1", createdAt: "2026-11-16T10:40:00Z" } }) };
   }
   if (path === "/session-start") {
     const body = JSON.parse(p.body || "{}");
@@ -268,6 +274,27 @@ document.getElementById("startSess").addEventListener("click", async () => {
   if (!go) return log("抽屉没打开", "err");
   go.click();
   log("已提交发起会话（默认路径）", "ok");
+});
+
+document.getElementById("backfill").addEventListener("click", async () => {
+  const d = frame.contentDocument;
+  const card = d?.querySelector(".card");
+  if (!card) return log("找不到卡片", "err");
+  card.click();
+  await new Promise((r) => setTimeout(r, 250));
+  const btn = d.querySelector("[data-backfill]");
+  if (!btn) return log("详情里没有「回填结论」", "err");
+  btn.click();
+  await new Promise((r) => setTimeout(r, 200));
+  const ta = d.querySelector("#conclText");
+  if (!ta) return log("回填抽屉没打开", "err");
+  ta.value = "已补上两列。\n\n验证：3 个月样本通过。";
+  ta.dispatchEvent(new d.defaultView.Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 80));
+  const go = d.querySelector("[data-concl-go]");
+  if (!go) return log("找不到写入按钮", "err");
+  go.click();
+  log("已提交回填结论", "ok");
 });
 
 document.getElementById("go").addEventListener("click", () => {

@@ -224,3 +224,34 @@ export async function patchWorkItem(cfg, projectId, workItemId, patch, fetchImpl
   );
   return mapItem(data);
 }
+
+/* ---------------- 07 片：评论回填 ---------------- */
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/** 纯文本 → Plane 评论用的 HTML：空行分段，单换行用 <br>。 */
+export function textToCommentHtml(text, { sessionId } = {}) {
+  const body = String(text || "")
+    .trim()
+    .split(/\n{2,}/)
+    .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  const head = sessionId
+    ? `<p><em>（来自 OpenChamber 会话 <code>${escapeHtml(sessionId)}</code>）</em></p>`
+    : "";
+  return head + body;
+}
+
+export async function addComment(cfg, projectId, workItemId, text, { sessionId } = {}, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/comments/`,
+    { method: "POST", body: { comment_html: textToCommentHtml(text, { sessionId }) }, fetchImpl },
+  );
+  return {
+    id: String(data?.uuid ?? data?.id ?? ""),
+    createdAt: data?.created_at ? String(data.created_at) : new Date().toISOString(),
+  };
+}

@@ -69,6 +69,7 @@ function cardHTML(item, draggable, detailId) {
       ${p.label ? `<span class="chip ${p.cls}">${p.label}</span>` : ""}
       ${initial ? `<span class="avatar">${ESC(initial)}</span>` : ""}
       <span class="grow"></span>
+      ${item.concl ? `<span class="chip ok" title="已回填结论">✓ 结论</span>` : ""}
       ${item.sess ? `<span class="chip sess">⌘ 会话</span>` : ""}
     </div>
   </article>`;

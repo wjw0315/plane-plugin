@@ -405,7 +405,7 @@ function viewFor(phase) {
       state.view === "list"
         ? listHTML({ ...state.board, detailId }) + (state.detail ? inlineDetailHTML() : "")
         : boardHTML({ ...state.board, detailId }) + (state.detail ? overlayDetailHTML() : "");
-    return base + (state.drawer ? drawerHTML() : "");
+    return base + (state.drawer ? drawerHTML() : "") + (state.concl ? conclHTML() : "");
   }
 
   return "";
@@ -442,6 +442,13 @@ function detailBody(item) {
       item.sess
         ? `<span class="chip sess">⌘ ${ESC(item.sess)}</span>`
         : `<button class="btn" data-start-session="${ESC(item.id)}">发起会话</button>`
+    }</div>
+    <div class="sec"><h4>结论</h4>${
+      item.concl
+        ? `<div class="desc">${ESC(item.conclText || "")}</div>
+           <div class="fine">✓ 已回填到 Plane 评论 · ${ESC(item.conclAt || "")}</div>`
+        : `<div class="fine">${item.sess ? "会话跑完后可以把结论写回这张卡。" : "还没有结论。"}</div>
+           <div class="acts" style="margin-top:8px"><button class="btn" data-backfill="${ESC(item.id)}">回填结论…</button></div>`
     }</div>
     <div class="sec"><h4>描述</h4>${desc}</div>
     <div class="acts">
@@ -625,6 +632,67 @@ function drawerHTML() {
     </div></div>`;
 }
 
+/* ---------------- 回填结论 ---------------- */
+
+function openConcl(itemId) {
+  const item = state.board.items.find((i) => i.id === itemId);
+  if (!item) return;
+  state.concl = { itemId, text: item.conclText || "", busy: false, error: null };
+  render();
+}
+
+function closeConcl() {
+  state.concl = null;
+  render();
+}
+
+async function submitConcl() {
+  const c = state.concl;
+  const item = state.board.items.find((i) => i.id === c.itemId);
+  if (!c || !item || c.busy) return;
+  const text = String(c.text || "").trim();
+  if (!text) {
+    c.error = { code: "EMPTY", message: "草稿是空的" };
+    return render();
+  }
+  c.busy = true;
+  c.error = null;
+  render();
+  try {
+    const { comment } = await callService("/comment", {
+      body: { projectId: state.selected, workItemId: item.id, body: text, sessionId: item.sess || undefined },
+    });
+    item.concl = true;
+    item.conclText = text;
+    item.conclAt = (comment?.createdAt || "").slice(0, 16).replace("T", " ") || "刚刚";
+    state.concl = null;
+    render();
+    showToast("已写入 Plane 评论");
+  } catch (e) {
+    c.busy = false;
+    c.error = { code: e.code || "COMMENT_FAILED", message: e.message || String(e) };
+    render();
+  }
+}
+
+function conclHTML() {
+  const c = state.concl;
+  const item = state.board.items.find((i) => i.id === c.itemId);
+  return `<div class="overlay"><div class="dhead">
+      <button class="back" data-concl-close="1" title="返回">‹</button>
+      <span class="ident">回填结论 · XLMSC-${ESC(item?.identifier || c.itemId)}</span>
+      <span class="grow"></span><span class="fine">Esc 返回</span></div>
+    <div class="dbody">
+      <div class="fine">作为评论追加到 Plane，不改动原描述。</div>
+      ${c.error ? `<div class="err">${ESC(c.error.code)}：${ESC(c.error.message)}</div>` : ""}
+      <textarea id="conclText" style="height:120px;margin-top:8px" placeholder="改了什么、怎么验证、遗留什么…">${ESC(c.text)}</textarea>
+      <div class="acts">
+        <button class="btn pri" data-concl-go="1"${c.busy || !String(c.text || "").trim() ? " disabled" : ""}>${c.busy ? "写入中…" : "写入评论"}</button>
+        <button class="btn" data-concl-close="1">取消</button>
+      </div>
+    </div></div>`;
+}
+
 /* ---------------- 事件 ---------------- */
 
 function wire() {
@@ -669,6 +737,24 @@ function wire() {
   document.querySelectorAll("[data-drawer-close]").forEach((el) => {
     el.addEventListener("click", () => closeDrawer());
   });
+  document.querySelectorAll("[data-backfill]").forEach((el) => {
+    el.addEventListener("click", () => openConcl(el.dataset.backfill));
+  });
+  document.querySelectorAll("[data-concl-close]").forEach((el) => {
+    el.addEventListener("click", () => closeConcl());
+  });
+  const conclGo = document.querySelector("[data-concl-go]");
+  if (conclGo) conclGo.addEventListener("click", () => submitConcl());
+  const conclText = $("conclText");
+  if (conclText) {
+    conclText.addEventListener("input", () => {
+      const c = state.concl;
+      if (!c) return;
+      c.text = conclText.value;
+      const go = document.querySelector("[data-concl-go]");
+      if (go) go.disabled = !conclText.value.trim() || c.busy;
+    });
+  }
   const go = document.querySelector("[data-drawer-go]");
   if (go) {
     go.addEventListener("click", () => {
@@ -740,6 +826,11 @@ function wire() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.concl) {
+    e.preventDefault();
+    closeConcl();
+    return;
+  }
   if (e.key === "Escape" && state.drawer) {
     e.preventDefault();
     closeDrawer();
