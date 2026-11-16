@@ -18,9 +18,10 @@ Plane MCP 解决的是 agent 的调用问题，人的可视化与手动流转在
 - **看板**：面板列出 workspace 下的项目，切项目后按该项目的 states 动态生成列，卡片渲染 work items；拖拽卡片改状态直接落到 Plane。
 - **本地 service 承接数据**：面板不直连 Plane，全部经 `host.serviceRequest` 打到扩展自己的 service 进程，service 负责认证、路径版本分支、错误归一化。
 - **配置**：扩展的 Integrations 设置卡片填 Plane 地址、API Key、workspace、默认项目、API 版本；面板从宿主拿到配置后随请求下发，service 保持无状态。
-- **会话打通（二期）**：会话菜单动作与 `/plane` 命令把当前会话和工作项对上（标签约定 `oc-<sessionId>`），会话事件驱动状态流转，卡片点击跳回会话。
+- **任务 → 会话 → 回填（闭环）**：任务详情里一键用「编号 + 标题 + 描述」起一个 OpenChamber 会话，自动打 `oc-<sessionId>` 标签并推到 In Progress；会话结束后把结论（可编辑草稿）作为评论回填到这张卡，卡片上留「✓ 结论」标记。
+- **反向（二期）**：`onSessionLifecycle` 驱动卡片上的「待回填/进行中」标记，`/plane` 命令与会话菜单动作把两侧对上。
 
-分两期：一期看板读写（可独立验收）；二期会话同步、斜杠命令与消息菜单动作。
+一期 = 看板读写 + 任务详情 + 发起会话 + 结论回填（可独立验收）；二期 = 会话事件联动、斜杠命令与消息菜单动作。
 
 ## User Stories
 
@@ -54,6 +55,16 @@ Plane MCP 解决的是 agent 的调用问题，人的可视化与手动流转在
 28. 作为团队成员，我想用返回按钮、Esc 或点空白处退出详情，以便不丢看板的位置与滚动。
 29. 作为会话使用者（二期），我想在详情里点关联会话直接跳过去，以便从任务回到对话上下文。
 30. 作为维护者，我想详情与看板共用同一套改状态路径，以便两处行为一致、只维护一份写入逻辑。
+31. 作为团队成员，我想在任务详情里一键「发起会话」，以便从任务直接开工，不用把标题复制到输入框。
+32. 作为团队成员，我想发起会话时自动把编号、标题、描述带进首条 prompt，以便 agent 一上来就有上下文。
+33. 作为团队成员，我想会话创建后自动把任务推到 In Progress 并打上会话标签，以便团队看到这张卡有人在做。
+34. 作为会话使用者，我想会话结束后把结论一键回填成任务评论，以便结论落回任务而不是留在对话里。
+35. 作为会话使用者，我想回填前能看并改结论草稿，以便删掉过程噪音只留结论。
+36. 作为团队成员，我想回填只追加评论、不改原描述，以便原始需求不被覆盖。
+37. 作为团队成员，我想卡片与详情上有「✓ 结论」标记，以便一眼看出哪些卡已经有结论。
+38. 作为团队成员，我想回填失败时草稿不丢并能重试，以便长文不用重写。
+39. 作为团队成员，我想在 Plane 网页里能看到这条评论，以便不装扩展的同事也能读。
+40. 作为维护者，我想回填由扩展 service 直连 Plane 评论接口，以便不依赖 agent 是否装了 MCP。
 
 ## Implementation Decisions
 
@@ -103,6 +114,16 @@ package.json
 - 详情改状态复用同一路径：与拖拽共用 `/patch-state`，成功后同样是「乐观更新 + 5 秒撤销」；失败回滚并保留详情页不关。
 - 详情数据来源：优先用列表已带字段直接渲染（秒开），同时发 `POST /work-item` 取最新单条（拿到最新描述与状态），返回后覆盖渲染；单条请求失败只提示「详情可能不是最新」，不阻断查看。
 
+**任务 → 会话 → 回填（闭环）**
+
+- **发起会话**：详情里「会话」行的「发起会话」按钮调宿主 `startSession({ projectId?, text })`（需 `sessions` 能力，带首条 prompt 还需 `prompt`）；`text` 由扩展拼装为「`XLMSC-<sequence_id> <标题>` + 空行 + 描述 + 空行 + 『完成后总结：改了什么、怎么验证、遗留什么』」。一期不做「先编辑 prompt」那层确认，prompt 拼装规则写死；二期再加。
+- **绑定与流转**：会话创建成功后把 `oc-<sessionId>` 追加进该工作项标签（`PATCH issues/{id}` 的 `labels`，实测 200 返回新数组），并把状态推到 In Progress（可在设置里关）。失败只回滚标签写入，不阻断会话本身。
+- **结论来源的硬约束**：SDK **没有**读取会话消息/最后一条 assistant 回复的方法（只有 `onSessionLifecycle` 的 `started/completed/failure`）。因此回填一律是「草稿 + 人工确认」，不自动抓内容；`completed` 事件只用来把卡片标成「待回填」。
+- **回填写入**：`POST /api/v1/workspaces/{slug}/projects/{pid}/issues/{id}/comments/`，body `{"comment_html":"<p>…</p>"}`（本机实测 201）。默认只追加评论、**不改描述**（`PATCH description_html` 虽实测 200 可用，但会覆盖人工维护的需求文本，不做）。评论首行加来源标记「（来自 OpenChamber 会话 `ses_xxx`）」以便区分扩展写入。
+- **草稿与失败**：结论草稿存在面板内存（不落盘），写评论失败保留草稿并给「重试」，抽屉不关；成功后清草稿、卡片与详情出现「✓ 结论」与回填时间。
+- **重复回填**：面板按 `workItem + sessionId` 记本地标记，重复回填先提示「这张卡已回填过」；Plane 侧无唯一约束，service 不做去重。
+- **可选增强（二期）**：会话首条 prompt 里要求 agent 结束时用 `plane` MCP 写评论做自助回填。当前 MCP 只有 8 个工具、**没有评论工具**，走这条路要先给 MCP 加 `add_comment`。
+
 **service（本地进程）**
 
 - 契约与现有扩展一致：读 `OPENCHAMBER_SERVICE_PORT` 与 `OPENCHAMBER_SERVICE_TOKEN`，请求需 `Authorization: Bearer <token>`，提供 `/health`。
@@ -116,6 +137,7 @@ package.json
 | `/work-items` | POST | `{ config, projectId, stateId? }` | `{ items: [{ id, identifier, name, stateId, priority, assignees, labels }] }` |
 | `/work-item` | POST | `{ config, projectId, workItemId }` | `{ item, description }`（详情覆盖层用，取最新单条） |
 | `/patch-state` | POST | `{ config, projectId, workItemId, stateId }` | `{ item }` |
+| `/comment` | POST | `{ config, projectId, workItemId, body, sessionId? }` | `{ commentId, createdAt }`（结论回填，追加评论） |
 | `/labels` | POST | `{ config, projectId? }` | `{ labels: [{ id, name }] }` |
 
 - 二期加 `/session-link`（`{ config, projectId, sessionId, title, phase }`）与 `/resolve-session`。
@@ -158,6 +180,7 @@ package.json
 
 - 把 `connectHost()` 换成注入的假 bridge（对象：`serviceRequest` / `onSettings` / `onSession` / `openSession` / `openExternal` / `toast` / `storage`），断言：设置变更后下一次请求带新 config；`onSession` 事件只触发卡片标记刷新而不发建卡请求；卡片点击调 `openSession` 的参数正确。
 - 详情交互也在这一层测：点卡片 → 覆盖层出现、列表节点未被卸载（返回后滚动位置不变）；详情里切状态只发一次 `/patch-state`（不重复发列表请求）；Esc 与返回箭头都关闭详情且焦点回到原卡片；「在 Plane 打开」→ `openExternal` 收到拼好的 URL；单条详情请求失败 → 出「可能不是最新」提示但仍渲染列表数据。
+- 闭环也在这一层测：点「发起会话」→ `startSession` 收到含编号与描述的 prompt，成功后跟一次「追加标签」与「推 In Progress」两次写入；`onSessionLifecycle(completed)` 只让卡片进入「待回填」，**不发**任何评论请求；回填草稿为空时「写入评论」不可点；写评论失败 → 抽屉不关、草稿还在、出现重试。
 - 这条接缝只在二期真正吃重（一期只有 settings/directory 与详情动作），一期先立骨架。
 
 **好测试的判据**
@@ -183,4 +206,7 @@ package.json
 - 已知抖动：该实例偶发 `fetch failed` / 502，所以重试语义写进了契约而不是留给 UI。
 - 面板里不放「建卡」入口的一期原因：一期只做读写看板，建卡属于二期会话打通的一部分，避免一期出现两个建卡口子（命令 + 按钮）语义不一致。
 - 若将来 Plane 升到 1.x，`apiVersion` 切 `v2` 即可回归，无需改面板；这是把版本差异关在 service 里的直接收益。
-- 布局原型（一次性，可丢弃）：`.scratch/openchamber-plane-plugin/prototype/panel-prototype.html`，`?variant=A|B|C` 或 ← → 切换，三档分别是「列式看板 + 覆盖详情」「分组列表 + 就地展开」「聚焦单列 + 底部抽屉」。看板形态未裁定；上面「覆盖式二级页」是详情形态的先行定稿（原型 A 档），B/C 两种替代形态留作对比，裁定后回填本节。
+- 已实测的 Plane 写入路径（2026-11-16，本机 0.23.1）：`POST …/issues/{id}/comments/` → 201；`GET …/comments/` → 200 游标分页；`PATCH …/issues/{id}/` 的 `description_html` → 200；`PATCH …/issues/{id}/` 的 `labels:[uuid]` → 200 并回传新数组。回填与打标签两条链路都已在本机跑通。
+- SDK 硬约束：`connectHost()` 只给 `startSession` / `prompt` / `onSessionLifecycle`（`started/completed/failure`），**没有读会话消息或最后一条回复的方法**。所以「结论」只能由人确认后再写，不能让扩展自动摘录；这也是回填做成草稿抽屉的直接原因。
+- MCP 缺口：现有 `plane` MCP 的 8 个工具里没有评论工具，agent 自助回填这条路要先给 MCP 加 `add_comment`（`POST …/comments/`）。扩展自身的回填写评论不经过 MCP。
+- 布局原型（一次性，可丢弃）：`.scratch/openchamber-plane-plugin/prototype/panel-prototype.html`，`?variant=A|B|C` 或 ← → 切换，三档分别是「列式看板 + 覆盖详情」「分组列表 + 就地展开」「聚焦单列 + 底部抽屉」；详情里已包含「发起会话 → 绑定 → 回填结论」整条链路（会话与评论都是模拟，不真调宿主）。看板形态未裁定；上面「覆盖式二级页」是详情形态的先行定稿（原型 A 档），B/C 两种替代形态留作对比，裁定后回填本节。
