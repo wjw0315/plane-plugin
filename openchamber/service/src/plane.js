@@ -108,3 +108,62 @@ export async function listProjects(cfg, fetchImpl = fetch) {
     identifier: String(r.identifier ?? ""),
   }));
 }
+
+/* ---------------- 03 片：状态 / 工作项 ---------------- */
+
+function unwrap(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+/** 工作项归一化：v1 没有 identifier，用 sequence_id 兜底；labels 可能是对象数组。 */
+export function mapItem(raw) {
+  const labels = Array.isArray(raw?.labels) ? raw.labels : [];
+  const assignees = Array.isArray(raw?.assignees) ? raw.assignees : [];
+  return {
+    id: String(raw?.uuid ?? raw?.id ?? ""),
+    identifier: String(raw?.identifier ?? raw?.sequence_id ?? ""),
+    name: String(raw?.name ?? ""),
+    stateId: String(raw?.state ?? ""),
+    priority: raw?.priority != null ? String(raw.priority) : null,
+    assignees: assignees.map((a) => ({
+      id: String(a?.uuid ?? a?.id ?? ""),
+      name: String(a?.display_name ?? a?.name ?? ""),
+    })),
+    labels: labels.map((l) => (typeof l === "string" ? l : String(l?.id ?? ""))).filter(Boolean),
+  };
+}
+
+const seg = (v) => encodeURIComponent(v);
+
+export async function listStates(cfg, projectId, fetchImpl = fetch) {
+  const data = await request(cfg, `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/states/`, { fetchImpl });
+  return unwrap(data)
+    .map((r) => ({
+      id: String(r.uuid ?? r.id ?? ""),
+      name: String(r.name ?? ""),
+      color: r.color ? String(r.color) : null,
+      order: Number(r.sequence ?? 0),
+    }))
+    .sort((a, b) => a.order - b.order);
+}
+
+export async function listWorkItems(cfg, projectId, stateId, fetchImpl = fetch) {
+  const qs = stateId ? `?state=${seg(stateId)}` : "";
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${qs}`,
+    { fetchImpl },
+  );
+  return unwrap(data).map(mapItem);
+}
+
+export async function patchState(cfg, projectId, workItemId, stateId, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/`,
+    { method: "PATCH", body: { state: stateId }, fetchImpl },
+  );
+  return mapItem(data);
+}

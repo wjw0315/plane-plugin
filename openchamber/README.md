@@ -14,7 +14,8 @@ Plane 任务看板的 **OpenChamber guest 扩展**。左侧 rail 一个面板，
 
 - **01 骨架**（完成）：面板能装出来、跟宿主握手、service 按契约应答 `/health`
 - **02 连接与配置**（完成）：面板内配置表单 → 列项目 → 三种错误面 → 记住项目
-- 03 起：列式看板、拖拽改状态
+- **03 列式看板**（完成）：按项目 states 生成列、卡片渲染、拖拽改状态（乐观更新 + 5 秒撤销 + 失败回滚）
+- 04 起：双视图切换（列 / 分组列表）
 
 ## 安装
 
@@ -59,6 +60,9 @@ npm test              # manifest 能被宿主解析 + service 契约冒烟
 | `GET /config` | 脱敏配置视图（`configured` / `baseUrl` / `workspace` / `apiVersion` / `hasKey`） |
 | `POST /config` | 保存配置；允许分步填，只在真正调 Plane 时要求完整 |
 | `POST /projects` | 用已存配置列项目（v1/v2 分支在这一层） |
+| `POST /states` | 列项目的状态（看板列，按 sequence 排序） |
+| `POST /work-items` | 列工作项（可按 `stateId` 过滤；v1 无 identifier 时用 `sequence_id`） |
+| `POST /patch-state` | 改工作项状态（拖拽落列） |
 
 错误码：`CONFIG_MISSING`(400) / `BAD_CONFIG`(400) / `AUTH_FAILED`(401) / `NOT_FOUND`(404) / `RATE_LIMITED`(429) / `NETWORK`(502)。`NETWORK` 与 `RATE_LIMITED` 在 service 内重试一次。
 

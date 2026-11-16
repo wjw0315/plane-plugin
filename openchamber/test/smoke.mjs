@@ -47,7 +47,7 @@ async function checkManifest() {
 
 /* ---------------- 假 Plane ---------------- */
 
-const plane = { mode: "ok", hits: 0 };
+const plane = { mode: "ok", hits: 0, patches: [] };
 const fakePlane = http.createServer((req, res) => {
   plane.hits++;
   const path = (req.url || "").split("?")[0];
@@ -61,6 +61,28 @@ const fakePlane = http.createServer((req, res) => {
   if (req.headers["x-api-key"] !== "test-key") return json(401, { error: "no key" });
   if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/") {
     return json(200, { results: [{ id: "p1", name: "xlm-scrm", identifier: "XLMSC" }, { id: "p2", name: "内部", identifier: "IN" }] });
+  }
+  if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/p1/states/") {
+    return json(200, { results: [
+      { id: "s2", name: "Todo", sequence: 2000, color: "#333" },
+      { id: "s1", name: "Backlog", sequence: 1000, color: "#aaa" },
+    ] });
+  }
+  if (req.method === "GET" && path === "/api/v1/workspaces/g2/projects/p1/issues/") {
+    return json(200, { results: [
+      { id: "i1", name: "任务A", state: "s1", sequence_id: 12, priority: "high",
+        assignees: [{ id: "u1", display_name: "王五" }], labels: [{ id: "l1", name: "后端" }] },
+    ] });
+  }
+  if (req.method === "PATCH" && path === "/api/v1/workspaces/g2/projects/p1/issues/i1/") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const body = JSON.parse(raw || "{}");
+      plane.patches.push(body);
+      json(200, { id: "i1", name: "任务A", state: body.state, sequence_id: 12, priority: "high", assignees: [], labels: [] });
+    });
+    return;
   }
   json(404, { error: "not found" });
 });
@@ -158,6 +180,35 @@ try {
   const boom = await call("/projects", { method: "POST" });
   check("Plane 500 → NETWORK", boom.status === 502 && boom.body?.error?.code === "NETWORK");
   check("网络类错误只重试一次（共两次请求）", plane.hits === 2, `hits=${plane.hits}`);
+
+  /* ---------------- 03 片：状态 / 工作项 / 改状态 ---------------- */
+
+  plane.mode = "ok";
+  const states = await call("/states", { method: "POST", body: { projectId: "p1" } });
+  check(
+    "列状态并按 sequence 排序",
+    states.status === 200 && states.body?.states?.length === 2 && states.body.states[0].id === "s1",
+    JSON.stringify(states.body).slice(0, 160),
+  );
+
+  const items = await call("/work-items", { method: "POST", body: { projectId: "p1" } });
+  const first = items.body?.items?.[0];
+  check(
+    "列工作项（v1 用 sequence_id 当编号）",
+    items.status === 200 && first?.identifier === "12" && first?.stateId === "s1" && first?.priority === "high",
+    JSON.stringify(first),
+  );
+
+  plane.patches = [];
+  const patched = await call("/patch-state", { method: "POST", body: { projectId: "p1", workItemId: "i1", stateId: "s2" } });
+  check("改状态成功并回传新状态", patched.status === 200 && patched.body?.item?.stateId === "s2", JSON.stringify(patched.body).slice(0, 160));
+  check("打到 Plane 的 body 是 {state}", JSON.stringify(plane.patches[0]) === '{"state":"s2"}', JSON.stringify(plane.patches[0]));
+
+  const missingItem = await call("/patch-state", { method: "POST", body: { projectId: "p1", workItemId: "nope", stateId: "s2" } });
+  check("改不存在的工作项 → NOT_FOUND", missingItem.status === 404 && missingItem.body?.error?.code === "NOT_FOUND");
+
+  const badPatch = await call("/patch-state", { method: "POST", body: { projectId: "p1" } });
+  check("缺参数 → BAD_CONFIG", badPatch.status === 400 && badPatch.body?.error?.code === "BAD_CONFIG");
 
   plane.mode = "ok";
   const badUrl = await call("/config", {

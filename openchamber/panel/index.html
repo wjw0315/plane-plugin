@@ -61,6 +61,32 @@
     font-size:11px;color:var(--fg3);background:var(--panel)}
   .crash{margin:8px 12px 0;padding:6px 8px;border:1px solid #4a2326;background:#241618;color:#f87171;
     border-radius:8px;font-size:11px;white-space:pre-wrap}
+  /* 看板 */
+  .board{display:flex;gap:8px;align-items:flex-start;overflow-x:auto;padding-bottom:8px}
+  .col{flex:0 0 168px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px;min-height:80px}
+  .col.over{border-color:#3f6ea8;background:#101823}
+  .col h2{font-size:10.5px;margin:0 0 7px;color:var(--fg2);font-weight:600;display:flex;gap:6px;align-items:center}
+  .col h2 .n{color:var(--fg3);font-weight:400}
+  .drop{display:flex;flex-direction:column;gap:6px;min-height:44px}
+  .blank{color:var(--fg3);font-size:10.5px;text-align:center;padding:8px 0;border:1px dashed var(--line2);border-radius:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 8px;cursor:grab}
+  .card:hover{border-color:var(--line2)}
+  .card.dragging{opacity:.45}
+  .card .t{font-size:11.5px;line-height:1.4;margin-bottom:5px;color:var(--fg)}
+  .card .meta{display:flex;align-items:center;gap:5px;color:var(--fg3);font-size:10px}
+  .ident{font-variant-numeric:tabular-nums;color:var(--fg3)}
+  .chip{border-radius:999px;padding:0 5px;font-size:9.5px;line-height:15px;border:1px solid transparent}
+  .p-urgent{color:#f87171;border-color:#3d2224;background:#241618}
+  .p-high{color:#fbbf24;border-color:#3d3320;background:#241f14}
+  .p-med{color:#60a5fa;border-color:#213341;background:#141e26}
+  .p-low{color:#6b7482;border-color:#2a3038;background:#191d22}
+  .avatar{width:15px;height:15px;border-radius:50%;background:#2b3542;color:#c7d2de;font-size:8.5px;
+    display:inline-flex;align-items:center;justify-content:center}
+  .sess{color:#a78bfa;border-color:#35295a;background:#1b1630}
+  .toast{position:sticky;bottom:0;margin:8px 0 0;display:flex;align-items:center;gap:8px;
+    background:#1b2129;border:1px solid var(--line2);border-radius:9px;padding:7px 9px;font-size:11px;color:var(--fg2)}
+  .toast.bad{border-color:#4a2326;background:#241618;color:#f87171}
+  .toast button{margin-left:auto;background:transparent;border:0;color:#7dd3fc;font-size:11px;cursor:pointer}
   .diag{margin-top:12px;border-top:1px solid var(--line);padding-top:8px;color:var(--fg3);font-size:10.5px}
   .diag summary{cursor:pointer;outline:none}
   .diag div{margin-top:4px;word-break:break-word}
@@ -77,6 +103,7 @@
   </header>
   <div id="crash" class="crash" hidden></div>
   <main id="view"></main>
+  <div id="toast" class="toast" hidden></div>
   <footer>
     <span>宿主</span><span id="hostState">—</span>
     <span>· service</span><span id="svcState">—</span>

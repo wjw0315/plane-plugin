@@ -11,10 +11,13 @@
  *   GET  /config    脱敏后的配置视图（面板渲染表单用）
  *   POST /config    保存配置（{ baseUrl, apiKey, workspace, apiVersion }）
  *   POST /projects  用已保存的配置列项目
+ *   POST /states     列项目的状态（看板列）
+ *   POST /work-items 列工作项（可按 stateId 过滤）
+ *   POST /patch-state 改工作项状态
  */
 import http from "node:http";
 import { loadConfig, saveConfig, maskConfig } from "./config.js";
-import { normalizeConfig, listProjects, PlaneError } from "./plane.js";
+import { normalizeConfig, listProjects, listStates, listWorkItems, patchState, PlaneError } from "./plane.js";
 
 const PORT = Number(process.env.OPENCHAMBER_SERVICE_PORT || 0);
 const TOKEN = process.env.OPENCHAMBER_SERVICE_TOKEN || "";
@@ -83,7 +86,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.2.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.3.0" });
       return;
     }
 
@@ -110,6 +113,35 @@ const server = http.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const projects = await listProjects(cfg);
       sendJson(res, 200, { ok: true, projects });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/states") {
+      const body = await readBody(req);
+      if (!body.projectId) throw new PlaneError("BAD_CONFIG", "缺少 projectId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const states = await listStates(cfg, body.projectId);
+      sendJson(res, 200, { ok: true, states });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/work-items") {
+      const body = await readBody(req);
+      if (!body.projectId) throw new PlaneError("BAD_CONFIG", "缺少 projectId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const items = await listWorkItems(cfg, body.projectId, body.stateId);
+      sendJson(res, 200, { ok: true, items });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/patch-state") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId || !body.stateId) {
+        throw new PlaneError("BAD_CONFIG", "patch-state 需要 projectId / workItemId / stateId");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const item = await patchState(cfg, body.projectId, body.workItemId, body.stateId);
+      sendJson(res, 200, { ok: true, item });
       return;
     }
 

@@ -6,6 +6,7 @@
  * 保存按钮点下去立刻有反馈，异常也会画到界面上（不再只是控制台里一声不响）。
  */
 import { connectHost } from "@openchamber/sdk";
+import { boardHTML, wireBoard } from "./board.js";
 
 const BUILD = "0.2.1+diag";
 const host = connectHost();
@@ -17,6 +18,8 @@ const state = {
   config: null,
   projects: [],
   selected: null,
+  board: { states: [], items: [] },
+  toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
   lastCall: null, // { method, path, status, code, message }
@@ -123,10 +126,67 @@ async function loadProjects() {
       state.selected = projects[0].id;
       await storeProject(state.selected);
     }
-    setPhase("list");
+    await loadBoard();
   } catch (e) {
     fail(e);
   }
+}
+
+async function loadBoard() {
+  setPhase("loading");
+  try {
+    const projectId = state.selected;
+    const { states } = await callService("/states", { body: { projectId } });
+    const { items } = await callService("/work-items", { body: { projectId } });
+    state.board = { states, items };
+    setPhase(states.length ? "board" : "empty");
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** 拖拽改状态：先动 UI，再落 Plane；失败回滚，成功给 5 秒撤销。 */
+async function moveItem(itemId, toStateId) {
+  const item = state.board.items.find((i) => i.id === itemId);
+  if (!item || item.stateId === toStateId) return;
+  const from = item.stateId;
+  item.stateId = toStateId;
+  render();
+
+  try {
+    await callService("/patch-state", {
+      body: { projectId: state.selected, workItemId: itemId, stateId: toStateId },
+    });
+    const name = state.board.states.find((s) => s.id === toStateId)?.name || "";
+    showToast(`已移到 ${name}`, "撤销", async () => {
+      item.stateId = from;
+      render();
+      try {
+        await callService("/patch-state", {
+          body: { projectId: state.selected, workItemId: itemId, stateId: from },
+        });
+        showToast("已撤销");
+      } catch (e) {
+        item.stateId = toStateId;
+        render();
+        showToast(`撤销失败：${e.code || ""}`, null, null, true);
+      }
+    });
+  } catch (e) {
+    item.stateId = from;
+    render();
+    showToast(`移动失败：${e.code || ""} ${e.message || ""}`, null, null, true);
+  }
+}
+
+function showToast(text, actionLabel, onAction, isError) {
+  state.toast = { text, actionLabel, onAction, isError };
+  render();
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => {
+    state.toast = null;
+    render();
+  }, actionLabel ? 5000 : 3000);
 }
 
 async function saveConfig(fields) {
@@ -182,6 +242,20 @@ async function storeProject(id) {
   }
 }
 
+function renderToast() {
+  const box = $("toast");
+  if (!box) return;
+  const t = state.toast;
+  if (!t) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.className = "toast" + (t.isError ? " bad" : "");
+  box.innerHTML = `<span>${ESC(t.text)}</span>${t.actionLabel ? `<button id="toastAction">${ESC(t.actionLabel)}</button>` : ""}`;
+}
+
 /* ---------------- 渲染 ---------------- */
 
 function setPhase(phase) {
@@ -203,17 +277,18 @@ function diagnostics() {
 }
 
 function render() {
-  const healthy = state.phase === "list" || state.phase === "empty";
+  const healthy = state.phase === "board" || state.phase === "empty";
   $("dot").className = healthy ? "dot on" : "dot";
   $("hostState").textContent = state.phase === "nohost" ? "未连接" : "已连接";
 
   const proj = $("proj");
-  proj.hidden = state.phase !== "list";
+  proj.hidden = state.phase !== "board";
   proj.innerHTML = state.projects
     .map((p) => `<option value="${ESC(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC(p.name)}</option>`)
     .join("");
 
   $("view").innerHTML = viewFor(state.phase) + diagnostics();
+  renderToast();
   wire();
 }
 
@@ -258,16 +333,11 @@ function viewFor(phase) {
       <div class="acts"><button data-act="retry">刷新</button><button data-act="setup">改配置</button></div></div>`;
   }
 
-  const current = state.projects.find((p) => p.id === state.selected);
-  return `<div class="list">${state.projects
-    .map(
-      (p) => `<button class="row${p.id === state.selected ? " sel" : ""}" data-pick="${ESC(p.id)}">
-        <span class="nm">${ESC(p.name)}</span>
-        <span class="idf">${ESC(p.identifier || "")}</span>
-      </button>`,
-    )
-    .join("")}</div>
-    <div class="fine">${state.projects.length} 个项目 · 当前 <b>${ESC(current?.name || "")}</b> · 看板在 03 片</div>`;
+  if (phase === "board") {
+    return boardHTML(state.board);
+  }
+
+  return "";
 }
 
 /* ---------------- 事件 ---------------- */
@@ -299,21 +369,27 @@ function wire() {
     });
   });
 
-  document.querySelectorAll("[data-pick]").forEach((el) => {
-    el.addEventListener("click", async () => {
-      state.selected = el.dataset.pick;
-      await storeProject(state.selected);
+  if (state.phase === "board") {
+    wireBoard($("view"), { onMove: moveItem });
+  }
+
+  const undo = $("toastAction");
+  if (undo) {
+    undo.addEventListener("click", () => {
+      const action = state.toast?.onAction;
+      state.toast = null;
       render();
+      action?.();
     });
-  });
+  }
 }
 
 $("proj").addEventListener("change", async (e) => {
   state.selected = e.target.value;
   await storeProject(state.selected);
-  render();
+  await loadBoard();
 });
-$("refresh").addEventListener("click", () => loadProjects());
+$("refresh").addEventListener("click", () => (state.phase === "board" ? loadBoard() : loadProjects()));
 
 /* ---------------- 启动 ---------------- */
 
@@ -322,6 +398,7 @@ host.onReady((ctx) => {
   ready = true;
   document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
   render(); // 先把宿主状态画出来，再加载
+  refreshServiceState();
   boot();
 });
 
@@ -342,4 +419,3 @@ async function refreshServiceState() {
 setTimeout(() => {
   if (!ready) setPhase("nohost");
 }, 1500);
-refreshServiceState();

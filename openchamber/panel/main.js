@@ -1581,6 +1581,80 @@
   var SURFACE_CONTROLLERS = ["none", "agent", "user"];
   var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 
+  // panel/src/board.js
+  var PRIO = {
+    urgent: { label: "\u7D27\u6025", cls: "p-urgent" },
+    high: { label: "\u9AD8", cls: "p-high" },
+    medium: { label: "\u4E2D", cls: "p-med" },
+    low: { label: "\u4F4E", cls: "p-low" },
+    none: { label: "", cls: "" }
+  };
+  var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function boardHTML({ states, items }) {
+    if (!states.length) {
+      return `<div class="empty"><div class="t">\u8FD9\u4E2A\u9879\u76EE\u8FD8\u6CA1\u6709\u72B6\u6001</div>
+      <div>\u53BB Plane \u91CC\u7ED9\u9879\u76EE\u914D\u4E00\u5957\u72B6\u6001\uFF08Backlog / Todo / \u2026\uFF09\uFF0C\u770B\u677F\u5217\u4F1A\u8DDF\u7740\u53D8\u3002</div></div>`;
+    }
+    const columns = states.map((s) => {
+      const list = items.filter((i) => i.stateId === s.id);
+      return `<section class="col" data-state-id="${ESC(s.id)}">
+        <h2><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></h2>
+        <div class="drop">${list.map(cardHTML).join("") || '<div class="blank">\u62D6\u5230\u8FD9\u91CC</div>'}</div>
+      </section>`;
+    }).join("");
+    return `<div class="board">${columns}</div>`;
+  }
+  function cardHTML(item) {
+    const p = PRIO[item.priority] || PRIO.none;
+    const who = item.assignees?.[0]?.name || "";
+    const initial = who ? who.slice(-2) : "";
+    return `<article class="card" draggable="true" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
+    <div class="t">${ESC(item.name)}</div>
+    <div class="meta">
+      <span class="ident">${item.identifier ? "XLMSC-" + ESC(item.identifier) : ""}</span>
+      ${p.label ? `<span class="chip ${p.cls}">${p.label}</span>` : ""}
+      ${initial ? `<span class="avatar">${ESC(initial)}</span>` : ""}
+      <span class="grow"></span>
+      ${item.sess ? `<span class="chip sess">\u2318 \u4F1A\u8BDD</span>` : ""}
+    </div>
+  </article>`;
+  }
+  function wireBoard(root, { onMove }) {
+    let dragging = null;
+    root.querySelectorAll(".card[draggable]").forEach((el) => {
+      el.addEventListener("dragstart", (e) => {
+        dragging = el.dataset.id;
+        el.classList.add("dragging");
+        try {
+          e.dataTransfer.setData("text/plain", el.dataset.id);
+          e.dataTransfer.effectAllowed = "move";
+        } catch {
+        }
+      });
+      el.addEventListener("dragend", () => {
+        dragging = null;
+        el.classList.remove("dragging");
+        root.querySelectorAll(".col.over").forEach((c) => c.classList.remove("over"));
+      });
+    });
+    root.querySelectorAll(".col").forEach((col) => {
+      col.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        col.classList.add("over");
+      });
+      col.addEventListener("dragleave", (e) => {
+        if (!col.contains(e.relatedTarget)) col.classList.remove("over");
+      });
+      col.addEventListener("drop", (e) => {
+        e.preventDefault();
+        col.classList.remove("over");
+        const id = dragging || e.dataTransfer?.getData("text/plain");
+        const to = col.dataset.stateId;
+        if (id && to) onMove(id, to);
+      });
+    });
+  }
+
   // panel/src/main.js
   var BUILD = "0.2.1+diag";
   var host = connectHost();
@@ -1592,6 +1666,8 @@
     config: null,
     projects: [],
     selected: null,
+    board: { states: [], items: [] },
+    toast: null,
     error: null,
     saveState: "",
     // 保存按钮旁边的即时反馈
@@ -1691,10 +1767,62 @@
         state.selected = projects[0].id;
         await storeProject(state.selected);
       }
-      setPhase("list");
+      await loadBoard();
     } catch (e) {
       fail(e);
     }
+  }
+  async function loadBoard() {
+    setPhase("loading");
+    try {
+      const projectId = state.selected;
+      const { states } = await callService("/states", { body: { projectId } });
+      const { items } = await callService("/work-items", { body: { projectId } });
+      state.board = { states, items };
+      setPhase(states.length ? "board" : "empty");
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function moveItem(itemId, toStateId) {
+    const item = state.board.items.find((i) => i.id === itemId);
+    if (!item || item.stateId === toStateId) return;
+    const from = item.stateId;
+    item.stateId = toStateId;
+    render();
+    try {
+      await callService("/patch-state", {
+        body: { projectId: state.selected, workItemId: itemId, stateId: toStateId }
+      });
+      const name = state.board.states.find((s) => s.id === toStateId)?.name || "";
+      showToast(`\u5DF2\u79FB\u5230 ${name}`, "\u64A4\u9500", async () => {
+        item.stateId = from;
+        render();
+        try {
+          await callService("/patch-state", {
+            body: { projectId: state.selected, workItemId: itemId, stateId: from }
+          });
+          showToast("\u5DF2\u64A4\u9500");
+        } catch (e) {
+          item.stateId = toStateId;
+          render();
+          showToast(`\u64A4\u9500\u5931\u8D25\uFF1A${e.code || ""}`, null, null, true);
+        }
+      });
+    } catch (e) {
+      item.stateId = from;
+      render();
+      showToast(`\u79FB\u52A8\u5931\u8D25\uFF1A${e.code || ""} ${e.message || ""}`, null, null, true);
+    }
+  }
+  function showToast(text, actionLabel, onAction, isError) {
+    state.toast = { text, actionLabel, onAction, isError };
+    render();
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => {
+      state.toast = null;
+      render();
+    }, actionLabel ? 5e3 : 3e3);
   }
   async function saveConfig(fields) {
     state.saveState = "\u4FDD\u5B58\u4E2D\u2026";
@@ -1743,28 +1871,42 @@
     } catch {
     }
   }
+  function renderToast() {
+    const box = $("toast");
+    if (!box) return;
+    const t = state.toast;
+    if (!t) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    box.className = "toast" + (t.isError ? " bad" : "");
+    box.innerHTML = `<span>${ESC2(t.text)}</span>${t.actionLabel ? `<button id="toastAction">${ESC2(t.actionLabel)}</button>` : ""}`;
+  }
   function setPhase(phase) {
     state.phase = phase;
     render();
   }
-  var ESC = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  var ESC2 = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   function diagnostics() {
     const last = state.lastCall;
-    return `<details class="diag"><summary>\u8BCA\u65AD\uFF08${ESC(BUILD)}\uFF09</summary>
-    <div>\u5BBF\u4E3B\uFF1A${ESC($("hostState").textContent || "\u2014")} \xB7 service\uFF1A${ESC($("svcState")?.textContent || "\u2014")}</div>
-    <div>\u6700\u8FD1\u8C03\u7528\uFF1A${last ? `${ESC(last.method)} ${ESC(last.path)} \u2192 ${last.status} ${ESC(last.code || "")}${last.ms ? ` (${last.ms}ms)` : ""}` : "\u65E0"}</div>
-    ${last?.message ? `<div>\u6D88\u606F\uFF1A${ESC(last.message)}</div>` : ""}
-    <ol>${state.calls.slice(1, 5).map((c) => `<li>${ESC(c.method)} ${ESC(c.path)} \u2192 ${c.status} ${ESC(c.code || "")}</li>`).join("")}</ol>
+    return `<details class="diag"><summary>\u8BCA\u65AD\uFF08${ESC2(BUILD)}\uFF09</summary>
+    <div>\u5BBF\u4E3B\uFF1A${ESC2($("hostState").textContent || "\u2014")} \xB7 service\uFF1A${ESC2($("svcState")?.textContent || "\u2014")}</div>
+    <div>\u6700\u8FD1\u8C03\u7528\uFF1A${last ? `${ESC2(last.method)} ${ESC2(last.path)} \u2192 ${last.status} ${ESC2(last.code || "")}${last.ms ? ` (${last.ms}ms)` : ""}` : "\u65E0"}</div>
+    ${last?.message ? `<div>\u6D88\u606F\uFF1A${ESC2(last.message)}</div>` : ""}
+    <ol>${state.calls.slice(1, 5).map((c) => `<li>${ESC2(c.method)} ${ESC2(c.path)} \u2192 ${c.status} ${ESC2(c.code || "")}</li>`).join("")}</ol>
   </details>`;
   }
   function render() {
-    const healthy = state.phase === "list" || state.phase === "empty";
+    const healthy = state.phase === "board" || state.phase === "empty";
     $("dot").className = healthy ? "dot on" : "dot";
     $("hostState").textContent = state.phase === "nohost" ? "\u672A\u8FDE\u63A5" : "\u5DF2\u8FDE\u63A5";
     const proj = $("proj");
-    proj.hidden = state.phase !== "list";
-    proj.innerHTML = state.projects.map((p) => `<option value="${ESC(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC(p.name)}</option>`).join("");
+    proj.hidden = state.phase !== "board";
+    proj.innerHTML = state.projects.map((p) => `<option value="${ESC2(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC2(p.name)}</option>`).join("");
     $("view").innerHTML = viewFor(state.phase) + diagnostics();
+    renderToast();
     wire();
   }
   function viewFor(phase) {
@@ -1780,21 +1922,21 @@
     if (phase === "setup") {
       return `<form id="setupForm" class="form" autocomplete="off">
       <div class="t">\u8FDE\u63A5 Plane</div>
-      ${err ? `<div class="err">${ESC(err.code)}\uFF1A${ESC(err.message)}</div>` : ""}
-      <label>\u5730\u5740<input name="baseUrl" placeholder="http://192.168.1.188:8080" value="${ESC(c.baseUrl || "")}"></label>
+      ${err ? `<div class="err">${ESC2(err.code)}\uFF1A${ESC2(err.message)}</div>` : ""}
+      <label>\u5730\u5740<input name="baseUrl" placeholder="http://192.168.1.188:8080" value="${ESC2(c.baseUrl || "")}"></label>
       <label>API Key<input name="apiKey" type="password" placeholder="${c.hasKey ? "\u5DF2\u4FDD\u5B58\uFF0C\u7559\u7A7A\u5219\u4E0D\u53D8" : "plane_api_\u2026"}" value=""></label>
-      <label>Workspace<input name="workspace" placeholder="g2" value="${ESC(c.workspace || "")}"></label>
-      <label>API \u7248\u672C<input name="apiVersion" list="versions" placeholder="v1 \u6216 v2" value="${ESC(c.apiVersion || "v2")}">
+      <label>Workspace<input name="workspace" placeholder="g2" value="${ESC2(c.workspace || "")}"></label>
+      <label>API \u7248\u672C<input name="apiVersion" list="versions" placeholder="v1 \u6216 v2" value="${ESC2(c.apiVersion || "v2")}">
         <datalist id="versions"><option value="v1"><option value="v2"></datalist></label>
       <button type="submit">\u4FDD\u5B58\u5E76\u8FDE\u63A5</button>
-      <div class="fine" id="saveState">${ESC(state.saveState)}</div>
+      <div class="fine" id="saveState">${ESC2(state.saveState)}</div>
       <div class="fine">Key \u5B58\u5728\u6269\u5C55\u81EA\u5DF1\u7684\u6570\u636E\u76EE\u5F55\uFF08600 \u6743\u9650\uFF09\uFF0C\u9762\u677F\u53EA\u62FF\u5230\u8131\u654F\u89C6\u56FE\u3002</div>
     </form>`;
     }
     if (phase === "error") {
       const retry = err?.code === "NETWORK" || err?.code === "RATE_LIMITED" ? `<button data-act="retry">\u91CD\u8BD5</button>` : "";
       return `<div class="empty"><div class="t">\u8FDE\u4E0D\u4E0A Plane</div>
-      <div class="err">${ESC(err?.code || "")}\uFF1A${ESC(err?.message || "")}</div>
+      <div class="err">${ESC2(err?.code || "")}\uFF1A${ESC2(err?.message || "")}</div>
       <div class="acts">${retry}<button data-act="setup">\u6539\u914D\u7F6E</button><button data-act="retry">\u518D\u8BD5\u4E00\u6B21</button></div></div>`;
     }
     if (phase === "empty") {
@@ -1802,14 +1944,10 @@
       <div>\u53BB Plane \u91CC\u5EFA\u4E00\u4E2A\u9879\u76EE\uFF0C\u6216\u8005\u6539\u914D\u7F6E\u6362 workspace\u3002</div>
       <div class="acts"><button data-act="retry">\u5237\u65B0</button><button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
     }
-    const current = state.projects.find((p) => p.id === state.selected);
-    return `<div class="list">${state.projects.map(
-      (p) => `<button class="row${p.id === state.selected ? " sel" : ""}" data-pick="${ESC(p.id)}">
-        <span class="nm">${ESC(p.name)}</span>
-        <span class="idf">${ESC(p.identifier || "")}</span>
-      </button>`
-    ).join("")}</div>
-    <div class="fine">${state.projects.length} \u4E2A\u9879\u76EE \xB7 \u5F53\u524D <b>${ESC(current?.name || "")}</b> \xB7 \u770B\u677F\u5728 03 \u7247</div>`;
+    if (phase === "board") {
+      return boardHTML(state.board);
+    }
+    return "";
   }
   function wire() {
     const form = $("setupForm");
@@ -1836,25 +1974,31 @@
         if (el.dataset.act === "setup") return setPhase("setup");
       });
     });
-    document.querySelectorAll("[data-pick]").forEach((el) => {
-      el.addEventListener("click", async () => {
-        state.selected = el.dataset.pick;
-        await storeProject(state.selected);
+    if (state.phase === "board") {
+      wireBoard($("view"), { onMove: moveItem });
+    }
+    const undo = $("toastAction");
+    if (undo) {
+      undo.addEventListener("click", () => {
+        const action = state.toast?.onAction;
+        state.toast = null;
         render();
+        action?.();
       });
-    });
+    }
   }
   $("proj").addEventListener("change", async (e) => {
     state.selected = e.target.value;
     await storeProject(state.selected);
-    render();
+    await loadBoard();
   });
-  $("refresh").addEventListener("click", () => loadProjects());
+  $("refresh").addEventListener("click", () => state.phase === "board" ? loadBoard() : loadProjects());
   var ready = false;
   host.onReady((ctx) => {
     ready = true;
     document.body.dataset.theme = ctx?.theme?.mode === "light" ? "light" : "dark";
     render();
+    refreshServiceState();
     boot();
   });
   host.onConnection?.((c) => {
@@ -1872,5 +2016,4 @@
   setTimeout(() => {
     if (!ready) setPhase("nohost");
   }, 1500);
-  refreshServiceState();
 })();

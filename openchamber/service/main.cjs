@@ -92,6 +92,9 @@ function normalizeConfig(raw) {
 function apiBase(cfg) {
   return `${cfg.baseUrl}${cfg.apiVersion === "v1" ? "/api/v1" : "/api/v2"}`;
 }
+function workItemsSegment(cfg) {
+  return cfg.apiVersion === "v1" ? "issues" : "work-items";
+}
 function errorForStatus(status, detail) {
   if (status === 401 || status === 403) return new PlaneError("AUTH_FAILED", "API Key \u65E0\u6548\u6216\u6CA1\u6709\u6743\u9650\uFF08401/403\uFF09", status);
   if (status === 404) return new PlaneError("NOT_FOUND", "\u7AEF\u70B9\u6216\u8D44\u6E90\u4E0D\u5B58\u5728\uFF08404\uFF09\uFF0C\u5730\u5740\u6216 API \u7248\u672C\u53EF\u80FD\u4E0D\u5BF9", 404);
@@ -143,6 +146,54 @@ async function listProjects(cfg, fetchImpl = fetch) {
     name: String(r.name ?? ""),
     identifier: String(r.identifier ?? "")
   }));
+}
+function unwrap(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+function mapItem(raw) {
+  const labels = Array.isArray(raw?.labels) ? raw.labels : [];
+  const assignees = Array.isArray(raw?.assignees) ? raw.assignees : [];
+  return {
+    id: String(raw?.uuid ?? raw?.id ?? ""),
+    identifier: String(raw?.identifier ?? raw?.sequence_id ?? ""),
+    name: String(raw?.name ?? ""),
+    stateId: String(raw?.state ?? ""),
+    priority: raw?.priority != null ? String(raw.priority) : null,
+    assignees: assignees.map((a) => ({
+      id: String(a?.uuid ?? a?.id ?? ""),
+      name: String(a?.display_name ?? a?.name ?? "")
+    })),
+    labels: labels.map((l) => typeof l === "string" ? l : String(l?.id ?? "")).filter(Boolean)
+  };
+}
+var seg = (v) => encodeURIComponent(v);
+async function listStates(cfg, projectId, fetchImpl = fetch) {
+  const data = await request(cfg, `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/states/`, { fetchImpl });
+  return unwrap(data).map((r) => ({
+    id: String(r.uuid ?? r.id ?? ""),
+    name: String(r.name ?? ""),
+    color: r.color ? String(r.color) : null,
+    order: Number(r.sequence ?? 0)
+  })).sort((a, b) => a.order - b.order);
+}
+async function listWorkItems(cfg, projectId, stateId, fetchImpl = fetch) {
+  const qs = stateId ? `?state=${seg(stateId)}` : "";
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${qs}`,
+    { fetchImpl }
+  );
+  return unwrap(data).map(mapItem);
+}
+async function patchState(cfg, projectId, workItemId, stateId, fetchImpl = fetch) {
+  const data = await request(
+    cfg,
+    `/workspaces/${seg(cfg.workspace)}/projects/${seg(projectId)}/${workItemsSegment(cfg)}/${seg(workItemId)}/`,
+    { method: "PATCH", body: { state: stateId }, fetchImpl }
+  );
+  return mapItem(data);
 }
 
 // service/src/main.js
@@ -203,7 +254,7 @@ var server = import_node_http.default.createServer(async (req, res) => {
   const path = (req.url || "").split("?")[0];
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.2.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.3.0" });
       return;
     }
     if (req.method === "GET" && path === "/config") {
@@ -226,6 +277,32 @@ var server = import_node_http.default.createServer(async (req, res) => {
       const cfg = requireConfig(await loadConfig(process.env));
       const projects = await listProjects(cfg);
       sendJson(res, 200, { ok: true, projects });
+      return;
+    }
+    if (req.method === "POST" && path === "/states") {
+      const body = await readBody(req);
+      if (!body.projectId) throw new PlaneError("BAD_CONFIG", "\u7F3A\u5C11 projectId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const states = await listStates(cfg, body.projectId);
+      sendJson(res, 200, { ok: true, states });
+      return;
+    }
+    if (req.method === "POST" && path === "/work-items") {
+      const body = await readBody(req);
+      if (!body.projectId) throw new PlaneError("BAD_CONFIG", "\u7F3A\u5C11 projectId");
+      const cfg = requireConfig(await loadConfig(process.env));
+      const items = await listWorkItems(cfg, body.projectId, body.stateId);
+      sendJson(res, 200, { ok: true, items });
+      return;
+    }
+    if (req.method === "POST" && path === "/patch-state") {
+      const body = await readBody(req);
+      if (!body.projectId || !body.workItemId || !body.stateId) {
+        throw new PlaneError("BAD_CONFIG", "patch-state \u9700\u8981 projectId / workItemId / stateId");
+      }
+      const cfg = requireConfig(await loadConfig(process.env));
+      const item = await patchState(cfg, body.projectId, body.workItemId, body.stateId);
+      sendJson(res, 200, { ok: true, item });
       return;
     }
     sendJson(res, 404, { ok: false, error: { code: "NOT_FOUND", message: `\u6CA1\u6709\u8FD9\u4E2A\u8DEF\u7531\uFF1A${req.method} ${path}` } });
