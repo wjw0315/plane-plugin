@@ -25,3 +25,12 @@ Status: ready-for-agent
 ## Blocked by
 
 - [07 手动回填](07-manual-conclusion-backfill.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `b1d0899`，版本 0.8.0）。
+  - manifest：`contributes.sessionEvents: { events: ["turn-finished"], content: true }`（授权 `transcript`）。
+  - service：`POST /session-events` 接宿主直投事件，`readSessionEventRequest` 校验信封；`turn-finished` → 按映射找工作项 → 把 `content.reply` 写成评论（首行标来源会话，`replyTruncated` 追加截断说明，超 4000 字符截断）；按 `(workItemId, sessionId, event.at)` 去重；设置里 `autoBackfill` 可关。
+  - 映射：`/session-start` 与 `/bind-session` 都会把 `sessionId → { workItemId, projectId }` 记进 service 内存。
+  - 假宿主 + 假 Plane 实测：投一条 turn-finished → 评论落地（含答复与来源会话号）；重复投递不重复写；截断标记出现；坏信封 → 400；`autoBackfill=false` → 跳过。
+  - **未验收**：真机装上后实际会话的自动回填（事件要经宿主投递，需真机装好后跑一轮真实会话）。
