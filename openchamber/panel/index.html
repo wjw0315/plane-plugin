@@ -61,6 +61,20 @@
     font-size:11px;color:var(--fg3);background:var(--panel)}
   .crash{margin:8px 12px 0;padding:6px 8px;border:1px solid #4a2326;background:#241618;color:#f87171;
     border-radius:8px;font-size:11px;white-space:pre-wrap}
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden}
+  .seg button{border:0;background:var(--card);color:var(--fg3);font-size:10.5px;padding:2px 7px;cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line2)}
+  .seg button[aria-pressed=true]{background:#1d2733;color:var(--fg)}
+  /* 列表视图 */
+  .group{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:var(--panel)}
+  .group>summary{list-style:none;cursor:pointer;padding:7px 9px;display:flex;align-items:center;gap:7px;
+    font-size:11px;color:var(--fg2);background:var(--card)}
+  .group>summary::-webkit-details-marker{display:none}
+  .group>summary .n{color:var(--fg3)}
+  .group .gin{padding:8px}
+  .moveto{margin:2px 0 10px;display:flex;gap:6px;align-items:center;color:var(--fg3);font-size:10px}
+  .moveto select{appearance:none;background:var(--card);border:1px solid var(--line2);color:var(--fg2);
+    border-radius:6px;font-size:10.5px;padding:1px 6px}
   /* 看板 */
   .board{display:flex;gap:8px;align-items:flex-start;overflow-x:auto;padding-bottom:8px}
   .col{flex:0 0 168px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px;min-height:80px}
@@ -98,6 +112,10 @@
     <span class="dot" id="dot"></span>
     <h1>Plane</h1>
     <span class="grow"></span>
+    <div class="seg" id="seg" hidden>
+      <button type="button" data-view="board" aria-pressed="true">列</button>
+      <button type="button" data-view="list">列表</button>
+    </div>
     <select id="proj" hidden></select>
     <button id="refresh" type="button" title="重新拉取">↻</button>
   </header>

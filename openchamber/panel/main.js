@@ -1604,11 +1604,11 @@
     }).join("");
     return `<div class="board">${columns}</div>`;
   }
-  function cardHTML(item) {
+  function cardHTML(item, draggable = true) {
     const p = PRIO[item.priority] || PRIO.none;
     const who = item.assignees?.[0]?.name || "";
     const initial = who ? who.slice(-2) : "";
-    return `<article class="card" draggable="true" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
+    return `<article class="card" draggable="${draggable}" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
     <div class="t">${ESC(item.name)}</div>
     <div class="meta">
       <span class="ident">${item.identifier ? "XLMSC-" + ESC(item.identifier) : ""}</span>
@@ -1654,12 +1654,35 @@
       });
     });
   }
+  function listHTML({ states, items }) {
+    if (!states.length) return boardHTML({ states, items });
+    return states.map((s) => {
+      const list = items.filter((i) => i.stateId === s.id);
+      const body = list.length ? list.map((it) => cardHTML(it, false) + moveHTML(it, states)).join("") : '<div class="blank">\u8FD9\u4E2A\u72B6\u6001\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u9879</div>';
+      return `<details class="group" open>
+        <summary><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></summary>
+        <div class="gin">${body}</div>
+      </details>`;
+    }).join("");
+  }
+  function moveHTML(item, states) {
+    const options = states.map((s) => `<option value="${ESC(s.id)}"${s.id === item.stateId ? " selected" : ""}>${ESC(s.name)}</option>`).join("");
+    return `<div class="moveto">\u79FB\u52A8\u5230 <select data-move="${ESC(item.id)}">${options}</select></div>`;
+  }
+  function wireList(root, { onMove }) {
+    root.querySelectorAll("[data-move]").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        if (sel.value) onMove(sel.dataset.move, sel.value);
+      });
+    });
+  }
 
   // panel/src/main.js
   var BUILD = "0.2.1+diag";
   var host = connectHost();
   var $ = (id) => document.getElementById(id);
   var STORAGE_KEY = "plane.project";
+  var VIEW_KEY = "plane.view";
   var state = {
     phase: "boot",
     // boot | nohost | setup | loading | list | empty | error
@@ -1667,6 +1690,8 @@
     projects: [],
     selected: null,
     board: { states: [], items: [] },
+    view: "board",
+    // board | list
     toast: null,
     error: null,
     saveState: "",
@@ -1751,6 +1776,7 @@
       const { config } = await callService("/config", { method: "GET" });
       state.config = config;
       state.selected = await readStoredProject();
+      state.view = await readStoredView() === "list" ? "list" : "board";
       if (!config.configured) return setPhase("setup");
       await loadProjects();
     } catch (e) {
@@ -1865,6 +1891,21 @@
       return null;
     }
   }
+  async function readStoredView() {
+    try {
+      const got = await host.storage.get(VIEW_KEY);
+      if (typeof got === "string") return got;
+      return got?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async function storeView(v) {
+    try {
+      await host.storage.set(VIEW_KEY, v);
+    } catch {
+    }
+  }
   async function storeProject(id) {
     try {
       await host.storage.set(STORAGE_KEY, id);
@@ -1902,6 +1943,13 @@
     const healthy = state.phase === "board" || state.phase === "empty";
     $("dot").className = healthy ? "dot on" : "dot";
     $("hostState").textContent = state.phase === "nohost" ? "\u672A\u8FDE\u63A5" : "\u5DF2\u8FDE\u63A5";
+    const seg = $("seg");
+    if (seg) {
+      seg.hidden = state.phase !== "board";
+      seg.querySelectorAll("[data-view]").forEach((el) => {
+        el.setAttribute("aria-pressed", String(el.dataset.view === state.view));
+      });
+    }
     const proj = $("proj");
     proj.hidden = state.phase !== "board";
     proj.innerHTML = state.projects.map((p) => `<option value="${ESC2(p.id)}"${p.id === state.selected ? " selected" : ""}>${ESC2(p.name)}</option>`).join("");
@@ -1945,7 +1993,7 @@
       <div class="acts"><button data-act="retry">\u5237\u65B0</button><button data-act="setup">\u6539\u914D\u7F6E</button></div></div>`;
     }
     if (phase === "board") {
-      return boardHTML(state.board);
+      return state.view === "list" ? listHTML(state.board) : boardHTML(state.board);
     }
     return "";
   }
@@ -1975,8 +2023,18 @@
       });
     });
     if (state.phase === "board") {
-      wireBoard($("view"), { onMove: moveItem });
+      if (state.view === "list") wireList($("view"), { onMove: moveItem });
+      else wireBoard($("view"), { onMove: moveItem });
     }
+    document.querySelectorAll("[data-view]").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const v = el.dataset.view;
+        if (v === state.view) return;
+        state.view = v;
+        await storeView(v);
+        render();
+      });
+    });
     const undo = $("toastAction");
     if (undo) {
       undo.addEventListener("click", () => {

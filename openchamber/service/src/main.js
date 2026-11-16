@@ -86,7 +86,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.3.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.4.0" });
       return;
     }
 

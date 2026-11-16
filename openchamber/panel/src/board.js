@@ -31,11 +31,11 @@ export function boardHTML({ states, items }) {
   return `<div class="board">${columns}</div>`;
 }
 
-function cardHTML(item) {
+function cardHTML(item, draggable = true) {
   const p = PRIO[item.priority] || PRIO.none;
   const who = item.assignees?.[0]?.name || "";
   const initial = who ? who.slice(-2) : "";
-  return `<article class="card" draggable="true" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
+  return `<article class="card" draggable="${draggable}" data-id="${ESC(item.id)}" data-state-id="${ESC(item.stateId)}">
     <div class="t">${ESC(item.name)}</div>
     <div class="meta">
       <span class="ident">${item.identifier ? "XLMSC-" + ESC(item.identifier) : ""}</span>
@@ -83,6 +83,44 @@ export function wireBoard(root, { onMove }) {
       const id = dragging || e.dataTransfer?.getData("text/plain");
       const to = col.dataset.stateId;
       if (id && to) onMove(id, to);
+    });
+  });
+}
+
+/* ---------------- 列表视图：纵向按状态分组 ---------------- */
+
+/**
+ * 单列纵向、按状态分组、可折叠；每张卡下面给「移动到」下拉。
+ * 窄面板（300–420px）里不用左右滚，代价是改状态多两次点击。
+ */
+export function listHTML({ states, items }) {
+  if (!states.length) return boardHTML({ states, items });
+  return states
+    .map((s) => {
+      const list = items.filter((i) => i.stateId === s.id);
+      const body = list.length
+        ? list.map((it) => cardHTML(it, false) + moveHTML(it, states)).join("")
+        : '<div class="blank">这个状态还没有工作项</div>';
+      return `<details class="group" open>
+        <summary><span class="nm">${ESC(s.name)}</span><span class="n">${list.length}</span></summary>
+        <div class="gin">${body}</div>
+      </details>`;
+    })
+    .join("");
+}
+
+function moveHTML(item, states) {
+  const options = states
+    .map((s) => `<option value="${ESC(s.id)}"${s.id === item.stateId ? " selected" : ""}>${ESC(s.name)}</option>`)
+    .join("");
+  return `<div class="moveto">移动到 <select data-move="${ESC(item.id)}">${options}</select></div>`;
+}
+
+/** 列表视图的交互：下拉改状态。 */
+export function wireList(root, { onMove }) {
+  root.querySelectorAll("[data-move]").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      if (sel.value) onMove(sel.dataset.move, sel.value);
     });
   });
 }

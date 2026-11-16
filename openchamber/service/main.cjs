@@ -254,7 +254,7 @@ var server = import_node_http.default.createServer(async (req, res) => {
   const path = (req.url || "").split("?")[0];
   try {
     if (req.method === "GET" && path === "/health") {
-      sendJson(res, 200, { ok: true, service: "plane", version: "0.3.0" });
+      sendJson(res, 200, { ok: true, service: "plane", version: "0.4.0" });
       return;
     }
     if (req.method === "GET" && path === "/config") {

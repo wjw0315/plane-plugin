@@ -25,6 +25,8 @@
       <button id="fill">1. 填测试值</button>
       <button id="go">2. 点「保存并连接」</button>
       <button id="drag">3. 拖第一张卡到 Todo</button>
+      <button id="toList">4. 切到列表视图</button>
+      <button id="moveSel">5. 下拉改到 Todo</button>
     </div>
     <iframe id="panel" src="../panel/index.html" style="height:calc(100% - 34px)"></iframe>
   </div>
@@ -194,6 +196,22 @@ document.getElementById("drag").addEventListener("click", () => {
   col.dispatchEvent(new win.DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
   card.dispatchEvent(new win.DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
   log("已模拟把第一张卡拖到 Todo", "ok");
+});
+
+document.getElementById("toList").addEventListener("click", () => {
+  const b = frame.contentDocument?.querySelector('[data-view="list"]');
+  if (!b) return log("切不到列表视图", "err");
+  b.click();
+  const groups = frame.contentDocument.querySelectorAll(".group").length;
+  log(`已切到列表视图，分组数=${groups}`, "ok");
+});
+document.getElementById("moveSel").addEventListener("click", () => {
+  const d = frame.contentDocument;
+  const sel = d?.querySelector("[data-move]");
+  if (!sel) return log("找不到「移动到」下拉", "err");
+  sel.value = "s2";
+  sel.dispatchEvent(new d.defaultView.Event("change", { bubbles: true }));
+  log("已用下拉把第一张卡改到 Todo", "ok");
 });
 
 document.getElementById("go").addEventListener("click", () => {

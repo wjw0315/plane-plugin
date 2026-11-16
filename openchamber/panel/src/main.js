@@ -6,12 +6,13 @@
  * 保存按钮点下去立刻有反馈，异常也会画到界面上（不再只是控制台里一声不响）。
  */
 import { connectHost } from "@openchamber/sdk";
-import { boardHTML, wireBoard } from "./board.js";
+import { boardHTML, listHTML, wireBoard, wireList } from "./board.js";
 
 const BUILD = "0.2.1+diag";
 const host = connectHost();
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = "plane.project";
+const VIEW_KEY = "plane.view";
 
 const state = {
   phase: "boot", // boot | nohost | setup | loading | list | empty | error
@@ -19,6 +20,7 @@ const state = {
   projects: [],
   selected: null,
   board: { states: [], items: [] },
+  view: "board", // board | list
   toast: null,
   error: null,
   saveState: "", // 保存按钮旁边的即时反馈
@@ -109,6 +111,7 @@ async function boot() {
     const { config } = await callService("/config", { method: "GET" });
     state.config = config;
     state.selected = await readStoredProject();
+    state.view = (await readStoredView()) === "list" ? "list" : "board";
     if (!config.configured) return setPhase("setup");
     await loadProjects();
   } catch (e) {
@@ -234,6 +237,23 @@ async function readStoredProject() {
     return null;
   }
 }
+async function readStoredView() {
+  try {
+    const got = await host.storage.get(VIEW_KEY);
+    if (typeof got === "string") return got;
+    return got?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+async function storeView(v) {
+  try {
+    await host.storage.set(VIEW_KEY, v);
+  } catch {
+    /* 存不了就用默认 */
+  }
+}
+
 async function storeProject(id) {
   try {
     await host.storage.set(STORAGE_KEY, id);
@@ -280,6 +300,14 @@ function render() {
   const healthy = state.phase === "board" || state.phase === "empty";
   $("dot").className = healthy ? "dot on" : "dot";
   $("hostState").textContent = state.phase === "nohost" ? "未连接" : "已连接";
+
+  const seg = $("seg");
+  if (seg) {
+    seg.hidden = state.phase !== "board";
+    seg.querySelectorAll("[data-view]").forEach((el) => {
+      el.setAttribute("aria-pressed", String(el.dataset.view === state.view));
+    });
+  }
 
   const proj = $("proj");
   proj.hidden = state.phase !== "board";
@@ -334,7 +362,7 @@ function viewFor(phase) {
   }
 
   if (phase === "board") {
-    return boardHTML(state.board);
+    return state.view === "list" ? listHTML(state.board) : boardHTML(state.board);
   }
 
   return "";
@@ -370,8 +398,19 @@ function wire() {
   });
 
   if (state.phase === "board") {
-    wireBoard($("view"), { onMove: moveItem });
+    if (state.view === "list") wireList($("view"), { onMove: moveItem });
+    else wireBoard($("view"), { onMove: moveItem });
   }
+
+  document.querySelectorAll("[data-view]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const v = el.dataset.view;
+      if (v === state.view) return;
+      state.view = v;
+      await storeView(v);
+      render(); // 同一份数据换渲染，不重新拉
+    });
+  });
 
   const undo = $("toastAction");
   if (undo) {
