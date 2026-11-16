@@ -25,3 +25,12 @@ Status: ready-for-agent
 ## Blocked by
 
 - [02 Plane 连接与配置](02-plane-connection-and-config.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `b260620`，版本 0.3.0）。
+  - service：`POST /states`（按 `sequence` 排序）、`POST /work-items`（可按 stateId 过滤）、`POST /patch-state`；工作项归一化（v1 无 `identifier` 用 `sequence_id`，`labels` 统一成 id 数组）。
+  - 面板：`board.js` 渲染状态列与卡片（编号 / 优先级 / 指派人）；拖拽落列走乐观更新，成功给 5 秒撤销，失败回滚并显示错误码。
+  - 实测（假宿主 + 假 Plane）：三列正确渲染、拖第一张卡到 Todo 后列计数 2/0/1 → 1/1/1、`POST /patch-state` body 为 `{"projectId","workItemId","stateId"}`、Plane 侧收到 `{"state":"s2"}`；控制台 0 错误。
+  - 顺手修：面板的 `serviceStatus()` 原来在宿主 ready 之前调用，永远显示「不可用」，已改到 ready 之后。
+  - **未验收**：真机装上看板与拖拽（仍待 02 的配置表单在真机跑通）。
