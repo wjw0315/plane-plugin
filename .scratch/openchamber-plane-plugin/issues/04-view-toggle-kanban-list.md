@@ -27,3 +27,12 @@ Status: ready-for-agent
 ## Blocked by
 
 - [03 A 列式看板](03-kanban-columns-and-drag.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `f010017`，版本 0.4.0）。
+  - 面板头部两段开关（列 / 列表）；选择写宿主 storage 的 `plane.view`，启动时读回，读不到退默认「列」。
+  - 列表视图：纵向按状态分组（可折叠、带数量），每张卡下方「移动到」下拉；卡片不参与拖拽，改状态走下拉。
+  - 两视图共用同一份内存数据与同一套改状态行为（乐观更新 + 5 秒撤销 + 失败回滚）。
+  - 假宿主实测：切到列表后分组正确渲染；切换前后 `service-request` 计数 5 → 5（没重新拉）；下拉改状态发出 `POST /patch-state`；日志可见 `storage.set key=plane.view value="list"`；控制台 0 错误。
+  - **未验收**：真机上「关掉面板再打开仍是上次的视图」（需要在真机装好后点一次）。
