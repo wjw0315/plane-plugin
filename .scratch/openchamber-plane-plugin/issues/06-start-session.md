@@ -32,3 +32,12 @@ Status: ready-for-agent
 ## Blocked by
 
 - [05 详情](05-work-item-detail.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `25e52d9`，版本 0.6.0）。
+  - manifest：`capabilities: [sessions, prompt]` + `sessionControl: { content: true }`（为 08 片的 lastReply 一起要的）。
+  - service：`POST /session-start`（透传 model/variant/agent；要 worktree 时先 `git worktree add <repo>/.worktrees/<name>` 带 `-B oc/<name>` 再传 directory）、`POST /bind-session`（`ensureLabel oc-<sid>` → 合并现有 labels → 一次 PATCH 带 labels+state）。
+  - 面板：详情「发起会话」抽屉（项目来自 `host.listProjects()` / worktree 开关 / 模型 / 思考级别 / 智能体 / 补充提示词 / prompt 预览）；默认走宿主 `startSession`，改了三件套或勾 worktree 走 service。
+  - 实测：临时 git 仓库里真建出 `.worktrees/task-12` 且 `sessions.start` 收到该目录；三件套原样透传；`bind-session` 建出项目级标签 `oc-ses_test` 并在一次 PATCH 里带 `labels` + `state`；假宿主跑通「抽屉 → start-session → bind-session → 卡片出现 `⌘ 会话` 角标」；控制台 0 错误。
+  - **未验收**：真机上发起会话（需要 02 的配置先在真机跑通；宿主还会弹出 sessions/prompt 授权）。
