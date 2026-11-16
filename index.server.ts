@@ -110,7 +110,7 @@ export default function contribute(server: PluginServerContext) {
         console.error(`[plane-plugin] 项目 ${projectId} 无 Backlog 状态，会话 ${agent.id} 不同步`);
         return;
       }
-      const label = await ensureLabel(config, `paseo-${agent.id}`);
+      const label = await ensureLabel(config, `paseo-${agent.id}`, projectId);
       const item = await createWorkItem(
         config,
         projectId,
@@ -209,7 +209,7 @@ export default function contribute(server: PluginServerContext) {
         return { status: "error", error: result.error };
       }
       const item = await getWorkItem(result.values, input.projectId, input.workItemId);
-      const agentId = await resolveSessionAgentId(result.values, item.labels);
+      const agentId = await resolveSessionAgentId(result.values, item.labels, input.projectId);
       if (!agentId) {
         return { status: "error", error: "该任务未关联 Paseo 会话" };
       }
@@ -235,7 +235,7 @@ export default function contribute(server: PluginServerContext) {
     const itemLabels = rawLabels
       ? rawLabels.map((l) => String(l))
       : (await getWorkItem(config, projectId, event.entityId)).labels;
-    const agentId = await resolveSessionAgentId(config, itemLabels);
+    const agentId = await resolveSessionAgentId(config, itemLabels, projectId);
     if (!agentId) return;
     if (!paseoNotifier) {
       console.error(`[plane-plugin] 无 paseo 引用，无法通知会话 ${agentId}`);

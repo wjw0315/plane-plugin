@@ -25,7 +25,19 @@
 | --- | --- |
 | `PLANE_BASE_URL` | 自托管 Plane 地址，如 `http://plane.example.com` |
 | `PLANE_API_KEY` | Plane API Key（`X-Api-Key` 认证） |
-| `PLANE_WORKSPACE` | 目标 workspace 标识 |
+| `PLANE_WORKSPACE` | 目标 workspace 标识（slug 或 uuid） |
+| `PLANE_API_VERSION` | API 版本，默认 `v2`；Plane 0.x 实例用 `v1` |
+
+### v1 与 v2 的差异
+
+| | v1（Plane 0.x，如 0.23.1） | v2（Plane 1.x 新 API） |
+| --- | --- | --- |
+| 前缀 | `/api/v1/` | `/api/v2/` |
+| 工作项路径 | `issues` | `work-items` |
+| 标签作用域 | 项目级（`/projects/{id}/labels/`） | workspace 级（`/labels/`） |
+| 认证 | `X-Api-Key` 可用 | 视实例而定 |
+
+`v1` 下 `list_labels` / `create_label` 需要传 `projectId`；不传时取 workspace 下第一个项目。
 
 ## 在 codeg 中接入
 

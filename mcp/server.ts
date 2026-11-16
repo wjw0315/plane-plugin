@@ -21,7 +21,8 @@ import {
  * 配置走环境变量（codeg Settings → MCP 的 environment 字段）：
  *   PLANE_BASE_URL   自托管 Plane 地址，如 http://plane.example.com
  *   PLANE_API_KEY    Plane API Key（X-Api-Key 认证）
- *   PLANE_WORKSPACE  目标 workspace 标识
+ *   PLANE_WORKSPACE  目标 workspace 标识（slug 或 uuid）
+ *   PLANE_API_VERSION  API 版本，默认 v2（Plane 1.x 新 API）；Plane 0.x 实例用 v1
  *
  * 复用 ../server/plane-api.ts 的 API 客户端，零重复逻辑。
  */
@@ -31,7 +32,7 @@ function loadConfig(): PlaneConfig {
     baseUrl: process.env.PLANE_BASE_URL ?? "",
     apiKey: process.env.PLANE_API_KEY ?? "",
     workspace: process.env.PLANE_WORKSPACE ?? "",
-    apiVersion: "v2",
+    apiVersion: process.env.PLANE_API_VERSION === "v1" ? "v1" : "v2",
     webhookEnabled: false,
     webhookSecret: "",
     webhookPort: 8788,
@@ -190,15 +191,17 @@ server.registerTool(
 server.registerTool(
   "list_labels",
   {
-    description: "列出 workspace 下的所有标签",
-    inputSchema: {},
+    description: "列出标签（v1 API 的标签属于项目，需传 projectId；v2 为 workspace 级）",
+    inputSchema: {
+      projectId: z.string().optional().describe("项目 uuid 或标识符（v1 API 必填）"),
+    },
   },
-  async () => {
+  async ({ projectId }) => {
     const config = loadConfig();
     const missing = requireConfig(config);
     if (missing) return errorResult(new Error(missing));
     try {
-      return textResult(await listLabels(config));
+      return textResult(await listLabels(config, projectId));
     } catch (e) {
       return errorResult(e);
     }
@@ -209,14 +212,17 @@ server.registerTool(
   "create_label",
   {
     description: "创建标签；名称已存在时返回已有标签",
-    inputSchema: { name: z.string().describe("标签名称") },
+    inputSchema: {
+      name: z.string().describe("标签名称"),
+      projectId: z.string().optional().describe("项目 uuid 或标识符（v1 API 必填）"),
+    },
   },
-  async ({ name }) => {
+  async ({ name, projectId }) => {
     const config = loadConfig();
     const missing = requireConfig(config);
     if (missing) return errorResult(new Error(missing));
     try {
-      return textResult(await ensureLabel(config, name));
+      return textResult(await ensureLabel(config, name, projectId));
     } catch (e) {
       return errorResult(e);
     }

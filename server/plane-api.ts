@@ -22,9 +22,24 @@ export class PlaneApiError extends Error {
   }
 }
 
+/**
+ * API 版本前缀。
+ *
+ * - v1：Plane 0.x 的公开 API（`/api/v1/`），`X-Api-Key` 认证，游标分页，工作项叫 issues。
+ * - v2：Plane 1.x 的新 API（`/api/v2/`），工作项叫 work-items。
+ */
+function apiPrefix(config: PlaneConfig): string {
+  return config.apiVersion === "v1" ? "/api/v1" : "/api/v2";
+}
+
+/** 工作项路径段：v1 叫 issues，v2 叫 work-items。 */
+function workItemSegment(config: PlaneConfig): string {
+  return config.apiVersion === "v1" ? "issues" : "work-items";
+}
+
 function resolveBaseUrl(config: PlaneConfig): string {
   const base = config.baseUrl.replace(/\/+$/, "");
-  return `${base}/api/v2`;
+  return `${base}${apiPrefix(config)}`;
 }
 
 function headers(config: PlaneConfig): Record<string, string> {
@@ -83,7 +98,7 @@ export async function listWorkItems(
   const qs = params.toString();
   const data = await request<{ results: Array<Record<string, unknown>> }>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/work-items/${qs ? `?${qs}` : ""}`,
+    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/${workItemSegment(config)}/${qs ? `?${qs}` : ""}`,
   );
   return data.results.map((raw) => mapWorkItem(raw));
 }
@@ -93,7 +108,7 @@ function mapWorkItem(raw: Record<string, unknown>): WorkItem {
   const labels = Array.isArray(raw.labels) ? raw.labels : [];
   return {
     id: String(raw.uuid ?? raw.id ?? ""),
-    identifier: String(raw.identifier ?? ""),
+    identifier: String(raw.identifier ?? raw.sequence_id ?? ""),
     name: String(raw.name ?? ""),
     stateId: String(raw.state ?? ""),
     priority: raw.priority != null ? String(raw.priority) : null,
@@ -114,9 +129,10 @@ function mapWorkItem(raw: Record<string, unknown>): WorkItem {
 export async function resolveSessionAgentId(
   config: PlaneConfig,
   itemLabels: string[],
+  projectId?: string,
 ): Promise<string | null> {
   if (itemLabels.length === 0) return null;
-  const labels = await listLabels(config);
+  const labels = await listLabels(config, projectId);
   const nameById = new Map(labels.map((l) => [l.id, l.name]));
   for (const id of itemLabels) {
     const name = nameById.get(id);
@@ -149,7 +165,7 @@ export async function patchState(
 ): Promise<WorkItem> {
   const data = await request<Record<string, unknown>>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/`,
+    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/${workItemSegment(config)}/${encodeURIComponent(workItemId)}/`,
     {
       method: "PATCH",
       body: JSON.stringify({ state: stateId }),
@@ -166,7 +182,7 @@ export async function getWorkItem(
 ): Promise<WorkItem> {
   const data = await request<Record<string, unknown>>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/`,
+    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/${workItemSegment(config)}/${encodeURIComponent(workItemId)}/`,
   );
   return mapWorkItem(data);
 }
@@ -179,11 +195,30 @@ export interface Label {
   name: string;
 }
 
-/** GET workspace 下的标签列表。 */
-export async function listLabels(config: PlaneConfig): Promise<Label[]> {
+/**
+ * 标签路径。
+ *
+ * v1 的标签挂在项目下（`/projects/{id}/labels/`），v2 挂在 workspace 下（`/labels/`）。
+ * v1 未指定 projectId 时，取 workspace 下第一个项目。
+ */
+async function labelsPath(config: PlaneConfig, projectId?: string): Promise<string> {
+  const ws = encodeURIComponent(config.workspace);
+  if (config.apiVersion !== "v1") return `/workspaces/${ws}/labels/`;
+  let pid = projectId;
+  if (!pid) {
+    const projects = await listProjects(config);
+    const first = projects[0];
+    if (!first) throw new PlaneApiError("workspace 下没有项目，无法定位标签", 404);
+    pid = first.id;
+  }
+  return `/workspaces/${ws}/projects/${encodeURIComponent(pid)}/labels/`;
+}
+
+/** GET 标签列表（v1 按项目过滤，v2 为 workspace 级）。 */
+export async function listLabels(config: PlaneConfig, projectId?: string): Promise<Label[]> {
   const data = await request<{ results: Array<Record<string, unknown>> }>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/labels/`,
+    await labelsPath(config, projectId),
   );
   return data.results.map((raw) => ({
     id: String(raw.uuid ?? raw.id ?? ""),
@@ -191,24 +226,28 @@ export async function listLabels(config: PlaneConfig): Promise<Label[]> {
   }));
 }
 
-/** POST 创建标签。 */
-export async function createLabel(config: PlaneConfig, name: string): Promise<Label> {
+/** POST 创建标签（v1 按项目创建，v2 为 workspace 级）。 */
+export async function createLabel(config: PlaneConfig, name: string, projectId?: string): Promise<Label> {
   const data = await request<Record<string, unknown>>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/labels/`,
+    await labelsPath(config, projectId),
     { method: "POST", body: JSON.stringify({ name, color: "#3b82f6" }) },
   );
   return { id: String(data.uuid ?? data.id ?? ""), name: String(data.name ?? name) };
 }
 
-/** 按名称找标签（workspace 内唯一），不存在则创建；并发撞名时回退再查。 */
-export async function ensureLabel(config: PlaneConfig, name: string): Promise<Label> {
+/** 按名称找标签（同作用域内唯一），不存在则创建；并发撞名时回退再查。 */
+export async function ensureLabel(
+  config: PlaneConfig,
+  name: string,
+  projectId?: string,
+): Promise<Label> {
   const find = async (): Promise<Label | undefined> =>
-    (await listLabels(config)).find((l) => l.name.toLowerCase() === name.toLowerCase());
+    (await listLabels(config, projectId)).find((l) => l.name.toLowerCase() === name.toLowerCase());
   const existing = await find();
   if (existing) return existing;
   try {
-    return await createLabel(config, name);
+    return await createLabel(config, name, projectId);
   } catch (e) {
     const again = await find();
     if (again) return again;
@@ -226,7 +265,7 @@ export async function createWorkItem(
 ): Promise<WorkItem> {
   const data = await request<Record<string, unknown>>(
     config,
-    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/work-items/`,
+    `/workspaces/${encodeURIComponent(config.workspace)}/projects/${encodeURIComponent(projectId)}/${workItemSegment(config)}/`,
     { method: "POST", body: JSON.stringify({ name, state: stateId, labels: labelIds }) },
   );
   return mapWorkItem(data);
