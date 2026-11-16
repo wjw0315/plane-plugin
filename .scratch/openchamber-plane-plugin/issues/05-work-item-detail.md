@@ -25,3 +25,13 @@ Status: ready-for-agent
 ## Blocked by
 
 - [04 视图切换 A↔B](04-view-toggle-kanban-list.md)
+
+## Comments
+
+- **2026-11-16 已实现**：`openchamber/`（提交 `7fda49f`，版本 0.5.0）。
+  - service：`POST /work-item` 取单条工作项 + `description_html` 转纯文本（段落/列表/实体解码，保留换行）。
+  - 面板：点卡片开详情——列视图走覆盖页、列表视图就地展开；先用列表数据秒开，再拉最新覆盖；Esc / 返回 / 收起关闭，关闭后焦点回原卡。
+  - 字段与动作：状态（可切，复用 `patch-state`）、编号、优先级、指派、标签、会话（占位）、描述、在 Plane 打开、复制链接。
+  - 假宿主实测：十个字段全部渲染、`POST /work-item` 拿到描述（`第二页重复\n- 复现：翻到第 2 页`）、Esc 关闭后看板仍在、列表视图内联展开无覆盖层；控制台 0 错误。
+  - 顺手修正：`host.openUrl` / `host.writeClipboard` 的签名是传字符串，不是 `{url}` / `{text}` 对象（SDK 类型定义核对的）。
+  - **未验收**：真机点开详情（依赖 02 的配置在真机跑通）。
