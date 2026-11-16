@@ -27,7 +27,7 @@ None - can start immediately
 
 ## Comments
 
-- **2026-11-16 已实现**：代码在独立仓库 `/Users/jiaweiwu/baidu_backup/macm1pro/work/project/openchamber-plane`（提交 `37e17a3`，尚未接远端）。
+- **2026-11-16 已实现**：代码在本仓库 `openchamber/` 子目录（提交 `9517cc7`；曾短暂放在独立仓库 `openchamber-plane`，同日并入本仓，独立仓库已删除）。**安装只能「添加文件夹」并选 `plane-plugin/openchamber`**——仓库根的 `package.json` 是 Paseo 插件清单，OpenChamber 的 git / zip 安装读不到 `openchamber` 块。
   - 已验收：manifest 用 SDK 自带的 `parseManifestJson` 解析通过；`npm test` 全绿（带 token 200 / 不带 401 / 错 token 401 / 未知路由 404 / SIGTERM 5 秒内退出 / 入口文件存在）；面板在真实浏览器里打开显示空态与「宿主未连接」，控制台 0 错误。
   - **未验收**：还差「装进 OpenChamber 后 rail 出现面板」——需要在 设置 → 扩展 → 添加文件夹 并允许本地 service，这一步是人工审批门。
-  - 实测坑：`service` 产物必须是 `.cjs`（`.js` 会被 `"type": "module"` 当 ESM，宿主拉起即 `require is not defined`）；`contributes.panel.id` 会被顶层 `id` 覆盖，两者写成同值。
+  - 实测坑：`service` 产物必须是 `.cjs`（`.js` 会被 `"type": "module"` 当 ESM，宿主拉起即 `require is not defined`）；`contributes.panel.id` 会被顶层 `id` 覆盖，两者写成同值；`esbuild` 要固定版本（0.25 与 0.28 打出的产物差一行 `"use strict"`，会让产物在两次安装间来回变）。
