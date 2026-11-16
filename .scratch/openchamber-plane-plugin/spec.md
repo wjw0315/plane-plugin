@@ -18,7 +18,7 @@ Plane MCP 解决的是 agent 的调用问题，人的可视化与手动流转在
 - **看板**：面板列出 workspace 下的项目，切项目后按该项目的 states 动态生成列，卡片渲染 work items；拖拽卡片改状态直接落到 Plane。
 - **双视图可切换**（原型裁定 A + B）：**列式看板**（默认，横向滚列、拖拽改状态）与**分组列表**（单列纵向按状态分组、详情就地展开）；面板头部一个两段开关切换，选择持久化在宿主 storage，重开面板沿用上次。
 - **本地 service 承接数据**：面板不直连 Plane，全部经 `host.serviceRequest` 打到扩展自己的 service 进程，service 负责认证、路径版本分支、错误归一化。
-- **配置**：扩展的 Integrations 设置卡片填 Plane 地址、API Key、workspace、默认项目、API 版本；面板从宿主拿到配置后随请求下发，service 保持无状态。
+- **配置**：配置写在面板自己的设置表单里（地址、API Key、workspace、API 版本），service 存到自己的数据目录（`config.json`，600），面板只拿脱敏视图（`configured` / `baseUrl` / `workspace` / `hasKey`）。**不用 Settings → Integrations**：平台的 `contributes.integration` 要求 `token.apiOrigin` 必须是 https（实测 http 直接被 schema 拒），自托管 Plane 常跑在局域网 http 上，那张卡片填不进去。
 - **任务 → 会话（可配置发起）**：详情里点「发起会话」开一个配置抽屉——项目、是否在全新 worktree 里跑（可命名 + 选基线分支）、模型、思考级别、智能体，外加一段补充提示词。prompt 由「编号 + 标题 + 描述 + 补充」拼成；起成功后打 `oc-<sessionId>` 标签、推到 In Progress。
 - **结论回填（自动 + 人工兜底）**：订阅会话事件，`turn-finished` 拿到 agent 的最终答复就写进 Plane 评论；详情里同时保留「回填结论…」的可编辑草稿入口，自动那条失败或想改措辞时用。卡片留「✓ 结论」标记，按会话去重。
 - **反向（二期）**：`onSessionLifecycle` 驱动卡片上的「待回填/进行中」标记，`/plane` 命令与会话菜单动作把两侧对上。
@@ -36,8 +36,8 @@ Plane MCP 解决的是 agent 的调用问题，人的可视化与手动流转在
 7. 作为团队成员，我想在拖拽时看到目标列高亮与失败回滚，以便知道这次操作到底成没成。
 8. 作为团队成员，我想在看板加载失败时看到明确原因（配置缺失 / Key 无效 / 路径不支持 / 网络不通），以便自己排查。
 9. 作为团队成员，我想点刷新重新拉数据，以便别人在 Plane 里改了状态后同步过来。
-10. 作为扩展使用者，我想在 OpenChamber 设置里的 Integrations 卡片填 Plane 地址、API Key、workspace、默认项目与 API 版本，以便一次配置长期可用。
-11. 作为扩展使用者，我想配置保存后立即生效，不必重启 OpenChamber，以便快速试错。
+10. 作为扩展使用者，我想在面板自己的设置表单里填 Plane 地址、API Key、workspace 与 API 版本，以便一次配置长期可用（局域网 http 实例用不了 Integrations 卡片）。
+11. 作为扩展使用者，我想配置保存后立即生效、不必重启 OpenChamber，以便快速试错。
 12. 作为扩展使用者，我想在配置不完整时面板给出引导而不是空白页，以便知道该去填什么。
 13. 作为维护者，我想扩展 service 用环境变量拿端口与令牌、以 `Authorization: Bearer` 校验，以便和 OpenChamber 现有扩展**同一套契约**（`/health` 探活）。
 14. 作为维护者，我想 Plane 客户端同时支持 `/api/v1`（`issues`、项目级标签）与 `/api/v2`（`work-items`、workspace 级标签），以便同一份代码适配 0.23 与 1.x 实例。
@@ -123,7 +123,7 @@ package.json
 
 - 用 `@openchamber/sdk` 的 `connectHost()`：`onReady` / `onSettings` / `onDirectory` / `onSession`（二期）/ `serviceRequest` / `toast` / `openExternal`。
 - iframe **不编译 TS、不加载 ESM**，面板必须打成单文件 IIFE 再引用。构建工具随仓库自选（esbuild 最省事）。
-- 面板不持有 Plane 凭据的持久副本：配置来自 `onSettings`，随每次请求下发。
+- 面板不持久化凭据：表单提交后由 service 落盘到自己的数据目录，面板只拿脱敏视图（`configured` / `baseUrl` / `workspace` / `hasKey`），拿不到 Key 本身。
 - 看板状态机：`未配置 → 加载项目 → 加载列与卡片 → 拖拽中 → 回滚/成功 → 打开详情`；列与卡片的数据结构只保留渲染必需字段，避免把 Plane 原始响应透传到 UI。
 - 「记住上次项目」用宿主 storage（`host.storage`），不落本地文件。
 
@@ -179,7 +179,9 @@ package.json
 | 路由 | 方法 | 入参 | 出参 |
 | --- | --- | --- | --- |
 | `/health` | GET | — | `{ ok: true }` |
-| `/projects` | POST | `{ config }` | `{ projects: [{ id, name, identifier }] }` |
+| `/config` | GET | — | `{ config: { configured, baseUrl, workspace, apiVersion, hasKey } }`（脱敏，不含 Key） |
+| `/config` | POST | `{ baseUrl, apiKey, workspace, apiVersion }` | `{ config }`（允许分步填，缺字段只在调 Plane 时才报） |
+| `/projects` | POST | — | `{ projects: [{ id, name, identifier }] }`（配置取自 service 自己存的那份） |
 | `/states` | POST | `{ config, projectId }` | `{ states: [{ id, name, color, order }] }` |
 | `/work-items` | POST | `{ config, projectId, stateId? }` | `{ items: [{ id, identifier, name, stateId, priority, assignees, labels }] }` |
 | `/work-item` | POST | `{ config, projectId, workItemId }` | `{ item, description }`（详情覆盖层用，取最新单条） |
@@ -222,7 +224,7 @@ package.json
 **接缝 B：service HTTP 路由（主接缝）**
 
 - 真起 `service/main.js`（注入 `OPENCHAMBER_SERVICE_PORT` + `OPENCHAMBER_SERVICE_TOKEN`），用 HTTP 打路由断言 JSON；凭据用**假的 Plane 服务**（同一进程内的 http server）冒充，断言 service 打到假 Plane 的路径与头。
-- 覆盖：缺 token → 401；`/health` → `{ok:true}`；配置缺字段 → `CONFIG_MISSING`；Plane 返回 401 → `AUTH_FAILED`；`/patch-state` 成功后回传规范化 item；`/comment` 打到 `…/comments/` 且 body 形状正确、Plane 4xx 映射成对应错误码；`NETWORK` 抖动重试一次的分支。
+- 覆盖：缺 token → 401；`/health` → `{ok:true}`；未配置列项目 → `CONFIG_MISSING`（带 `missing`）；`POST /config` 后 `GET /config` 里**没有** API Key；地址带 `/api` 后缀 → `BAD_CONFIG`；Plane 返回 401 → `AUTH_FAILED`（HTTP 401）；Plane 500 → `NETWORK`（HTTP 502）且**只重试一次**（假 Plane 计数 = 2）；`/patch-state` 成功后回传规范化 item；`/comment` 打到 `…/comments/` 且 body 形状正确、Plane 4xx 映射成对应错误码。
 - **自动回填在这条接缝上测最好**：直接 POST 一份 `turn-finished` 的 `GuestSessionEventRequest` 到 `/session-events`（`content.reply` 有内容、`event.linked` 带 `provider:"plane"`），断言 service 向假 Plane 发了一条评论、`comment_html` 里含答复正文与来源会话号；重复投递同一 `event.at` → 第二次不再写、仍回 `{ok:true}`；`replyTruncated: true` → 评论尾部带截断提示；假 Plane 返 500 → 回 `{ok:false}` 且不抛。
 - service 侧发起会话要断言 `sessions.start` 的入参：注入假 host 调用层，检查 `{model, variant, agent, prompt, directory|projectId}` 与用户选择一致；勾「新 worktree」时断言先有 `git worktree add`（可用临时 git 仓库替身）再带 `directory`（该目录正是新建的 worktree 路径）。
 - 先例：OpenChamber 现有扩展（openspec-board）就是「`node service/main.js` + `curl /health` + `POST /changes`」验收，本仓库 `mcp/` 的 stdio 自检脚本是同一种「把接缝跑起来再断言」的做法。
