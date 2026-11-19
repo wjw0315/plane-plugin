@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plane 任务看板 · 设计稿预览（PROTOTYPE）</title>
+    <!--
+      PROTOTYPE / 一次性预览：单文件、零依赖、mock 数据。
+      目的是让设计稿「能看」——不依赖 Plane API Key，不用重启 Paseo。
+      真实实现见同目录的 *.tsx（tokens.ts / header.tsx / board-view.tsx / list-view.tsx / card.tsx / toast.tsx）。
+      看完即弃，勿当生产代码。
+    -->
+    <style>
+      :root {
+        --surface0: #0f1114;
+        --surface1: #15181d;
+        --surface2: #1b1f25;
+        --border: #262b33;
+        --foreground: #e6e9ee;
+        --foreground-muted: #8b94a3;
+        --accent: #4f7fd6;
+        --accent-foreground: #ffffff;
+        --status-success: #4ade80;
+        --status-danger: #f87171;
+
+        --header-height: 40px;
+        --header-padding-h: 12px;
+        --body-padding: 12px;
+        --column-width: 200px;
+        --column-gap: 8px;
+        --column-padding: 8px;
+        --column-radius: 10px;
+        --card-radius: 9px;
+        --card-gap: 6px;
+        --title-font-size: 13px;
+        --title-line-height: 18px;
+        --meta-font-size: 10.5px;
+        --chip-font-size: 9.5px;
+        --chip-line-height: 15px;
+        --avatar-size: 16px;
+        --seg-font-size: 10.5px;
+        --column-name-font-size: 11px;
+        --toast-radius: 9px;
+        --dot-size: 6px;
+
+        --priority-urgent-fg: #f87171; --priority-urgent-bg: #241618;
+        --priority-high-fg: #fbbf24;   --priority-high-bg: #241f14;
+        --priority-medium-fg: #60a5fa; --priority-medium-bg: #141e26;
+        --priority-low-fg: #6b7482;    --priority-low-bg: #191d22;
+        --session-fg: #a78bfa;         --session-bg: #1b1630;
+        --toast-success-bg: #1b2129;
+        --toast-error-bg: #241618;
+        --toast-error-border: #4a2326;
+        --drag-over-border: #3f6ea8;
+        --drag-over-bg: #101823;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--surface0);
+        color: var(--foreground);
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      }
+      .app { display: flex; flex-direction: column; height: 100vh; }
+
+      /* 顶栏 */
+      .header {
+        height: var(--header-height);
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px var(--header-padding-h);
+        border-bottom: 1px solid var(--border);
+        position: relative;
+      }
+      .dot { width: var(--dot-size); height: var(--dot-size); border-radius: 50%; flex: 0 0 auto; }
+      .dot.connected { background: var(--status-success); }
+      .dot.idle { background: var(--foreground-muted); }
+      .title { font-size: 12px; font-weight: 600; }
+      .seg { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface2); }
+      .seg button {
+        border: 0; background: transparent; color: var(--foreground-muted);
+        font-size: var(--seg-font-size); padding: 2px 7px; cursor: pointer; font-family: inherit;
+      }
+      .seg button + button { border-left: 1px solid var(--border); }
+      .seg button.active { background: var(--accent); color: var(--accent-foreground); }
+      .grow { flex: 1; }
+      .project-btn {
+        max-width: 140px; border: 1px solid var(--border); border-radius: 6px;
+        background: var(--surface2); color: var(--foreground-muted); font-size: 11px;
+        padding: 2px 6px; cursor: pointer; font-family: inherit;
+      }
+      .icon-btn {
+        border: 0; background: transparent; color: var(--foreground-muted);
+        font-size: 13px; padding: 2px 3px; cursor: pointer;
+      }
+      .icon-btn:hover { color: var(--foreground); }
+      .menu {
+        position: absolute; top: var(--header-height); right: var(--header-padding-h);
+        min-width: 160px; max-width: 260px; background: var(--surface1);
+        border: 1px solid var(--border); border-radius: 8px; padding: 4px 0; z-index: 30;
+      }
+      .menu button {
+        display: block; width: 100%; text-align: left; border: 0; background: transparent;
+        color: var(--foreground); font-size: 11px; padding: 5px 10px; cursor: pointer; font-family: inherit;
+      }
+      .menu button.active { background: var(--accent); color: var(--accent-foreground); }
+
+      .body { flex: 1; min-height: 0; position: relative; }
+
+      /* 列视图 */
+      .board { height: 100%; overflow-x: auto; overflow-y: hidden; }
+      .board-inner { display: flex; align-items: flex-start; gap: var(--column-gap); padding: var(--body-padding); padding-bottom: 28px; }
+      .column {
+        width: var(--column-width); flex: 0 0 auto;
+        background: var(--surface1); border: 1px solid var(--border);
+        border-radius: var(--column-radius); padding: var(--column-padding); min-height: 80px;
+      }
+      .column.drag-over { border-color: var(--drag-over-border); background: var(--drag-over-bg); }
+      .column-header { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+      .column-name { flex: 1; font-size: var(--column-name-font-size); font-weight: 600; }
+      .column-count { font-size: var(--meta-font-size); color: var(--foreground-muted); }
+      .blank {
+        border: 1px dashed var(--border); border-radius: var(--card-radius);
+        padding: 8px; text-align: center; font-size: var(--meta-font-size); color: var(--foreground-muted);
+      }
+
+      /* 卡片 */
+      .card {
+        background: var(--surface2); border: 1px solid var(--border); border-radius: var(--card-radius);
+        padding: 8px 9px; margin-bottom: var(--card-gap); cursor: grab;
+      }
+      .card.dragging { opacity: 0.45; }
+      .card-title { font-size: var(--title-font-size); line-height: var(--title-line-height); font-weight: 500; }
+      .meta-row { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+      .identifier { font-size: var(--meta-font-size); color: var(--foreground-muted); font-variant-numeric: tabular-nums; }
+      .chip {
+        display: inline-flex; align-items: center; height: var(--chip-line-height);
+        border-radius: 999px; border: 1px solid var(--border); padding: 0 5px;
+        font-size: var(--chip-font-size); line-height: var(--chip-line-height); white-space: nowrap;
+      }
+      .chip.priority-urgent { color: var(--priority-urgent-fg); background: var(--priority-urgent-bg); }
+      .chip.priority-high { color: var(--priority-high-fg); background: var(--priority-high-bg); }
+      .chip.priority-medium { color: var(--priority-medium-fg); background: var(--priority-medium-bg); }
+      .chip.priority-low { color: var(--priority-low-fg); background: var(--priority-low-bg); }
+      .chip.label { color: var(--foreground-muted); background: transparent; }
+      .chip.session { color: var(--session-fg); background: var(--session-bg); cursor: pointer; }
+      .avatar {
+        width: var(--avatar-size); height: var(--avatar-size); border-radius: 50%;
+        background: var(--accent); border: 1px solid var(--border); color: var(--accent-foreground);
+        font-size: 9px; display: inline-flex; align-items: center; justify-content: center;
+      }
+      .unassigned { font-size: var(--meta-font-size); color: var(--foreground-muted); }
+      .chip-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+
+      /* 列表视图 */
+      .list { height: 100%; overflow-y: auto; padding: var(--body-padding); padding-bottom: 48px; }
+      .group { border: 1px solid var(--border); border-radius: var(--column-radius); margin-bottom: 8px; overflow: hidden; }
+      .group-header {
+        display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+        background: var(--surface2); cursor: pointer; user-select: none;
+      }
+      .chevron { font-size: 10px; width: 10px; color: var(--foreground-muted); }
+      .group-name { flex: 1; font-size: var(--column-name-font-size); font-weight: 600; }
+      .group-count { font-size: var(--meta-font-size); color: var(--foreground-muted); }
+      .group-body { padding: 8px; }
+      .move-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+      .move-label { font-size: 10px; color: var(--foreground-muted); }
+      .pill-row { display: flex; gap: 6px; overflow-x: auto; }
+      .pill {
+        border: 1px solid var(--border); border-radius: 999px; background: transparent;
+        color: var(--foreground-muted); font-size: var(--seg-font-size); padding: 1px 8px;
+        cursor: pointer; white-space: nowrap; font-family: inherit;
+      }
+      .pill.active { background: var(--accent); color: var(--accent-foreground); }
+
+      /* toast */
+      .toast {
+        position: absolute; left: var(--header-padding-h); right: var(--header-padding-h); bottom: 10px;
+        display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+        background: var(--toast-success-bg); border: 1px solid var(--border);
+        border-radius: var(--toast-radius); font-size: 11px; color: var(--foreground-muted);
+      }
+      .toast.error { background: var(--toast-error-bg); border-color: var(--toast-error-border); color: var(--status-danger); }
+      .toast .undo { margin-left: auto; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; }
+
+      /* 原型提示条 */
+      .proto-bar {
+        flex: 0 0 auto; font-size: 11px; color: var(--foreground-muted);
+        background: #10141b; border-top: 1px solid var(--border); padding: 5px 12px;
+      }
+      .proto-bar b { color: var(--foreground); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="header">
+        <span class="dot connected" id="status-dot"></span>
+        <span class="title">Plane 任务看板</span>
+        <div class="seg">
+          <button data-view="board" class="active">列</button>
+          <button data-view="list">列表</button>
+        </div>
+        <span class="grow"></span>
+        <button class="project-btn" id="project-btn">XLMSC ▾</button>
+        <button class="icon-btn" id="refresh-btn" title="刷新">↻</button>
+        <button class="icon-btn" id="settings-btn" title="设置">⚙</button>
+      </div>
+
+      <div class="body" id="body"></div>
+
+      <div class="proto-bar">
+        <b>PROTOTYPE</b> · mock 数据预览，版式与 <code>paseo/client/plane/*.tsx</code> 一致；真实页面在 Paseo 命令中心 →「打开 Plane 任务看板」。
+      </div>
+    </div>
+
+    <script>
+      const PRIORITY = {
+        urgent: { label: "紧急", cls: "priority-urgent" },
+        high: { label: "高", cls: "priority-high" },
+        medium: { label: "中", cls: "priority-medium" },
+        low: { label: "低", cls: "priority-low" },
+      };
+      const IDENTIFIER_PREFIX = "XLMSC-";
+
+      // ---- mock 数据（形状与 shared/plane-rpc.ts 一致）----
+      const projects = [
+        { id: "p1", name: "XLMSC" },
+        { id: "p2", name: "SCRM" },
+        { id: "p3", name: "网关平台" },
+      ];
+      const states = [
+        { id: "s1", name: "Backlog", color: "#6b7482" },
+        { id: "s2", name: "Todo", color: "#60a5fa" },
+        { id: "s3", name: "In Progress", color: "#fbbf24" },
+        { id: "s4", name: "In Review", color: "#a78bfa" },
+        { id: "s5", name: "Done", color: "#4ade80" },
+      ];
+      let items = [
+        { id: "i1", name: "SCRM 后台管理系统列表页筛选交互", identifier: "12", priority: "high", stateId: "s2",
+          assignees: [{ name: "吴嘉伟" }], labels: ["前端", "paseo-cid_plane_demo"] },
+        { id: "i2", name: "客户档案详情页字段补齐", identifier: "13", priority: "medium", stateId: "s2",
+          assignees: [], labels: [] },
+        { id: "i3", name: "订单批量导出超时", identifier: "9", priority: "urgent", stateId: "s3",
+          assignees: [{ name: "李明" }], labels: ["后端", "线上问题"] },
+        { id: "i4", name: "移动端商品卡片圆角统一", identifier: "21", priority: "low", stateId: "s3",
+          assignees: [{ name: "张岚" }], labels: ["小程序"] },
+        { id: "i5", name: "订单详情页接入新接口", identifier: "31", priority: "medium", stateId: "s4",
+          assignees: [{ name: "王宇" }], labels: ["后端"] },
+        { id: "i6", name: "经销商档案合并规则", identifier: "4", priority: "null", stateId: "s1",
+          assignees: [], labels: ["调研"] },
+        { id: "i7", name: "登录页接入企业微信扫码", identifier: "55", priority: "high", stateId: "s5",
+          assignees: [{ name: "吴嘉伟" }], labels: ["后端", "paseo-cid_plane_demo2"] },
+      ];
+
+      // ---- 状态渲染 ----
+      const params = new URLSearchParams(location.search);
+      let view = params.get("view") === "list" ? "list" : "board";
+      let selectedProjectId = "p1";
+      let collapsed = {};
+      let toast = null;
+      let toastTimer = null;
+
+      const el = (id) => document.getElementById(id);
+      const itemsByState = (sid) => items.filter((i) => i.stateId === sid);
+
+      function chipClass(priority) {
+        const p = PRIORITY[priority];
+        return p ? "chip " + p.cls : null;
+      }
+
+      function cardInnerHtml(item) {
+        const assignee = item.assignees.length ? item.assignees[0].name : null;
+        const labels = item.labels.filter((l) => !/^paseo-/.test(l));
+        const hasSession = item.labels.some((l) => /^paseo-/.test(l));
+        const p = PRIORITY[item.priority];
+        return `
+            <div class="card-title">${item.name}</div>
+            <div class="meta-row">
+              <span class="identifier">${item.identifier ? IDENTIFIER_PREFIX + item.identifier : ""}</span>
+              ${p ? `<span class="${chipClass(item.priority)}">${p.label}</span>` : ""}
+              ${
+                assignee
+                  ? `<span class="avatar" title="${assignee}">${assignee.slice(-2)}</span>`
+                  : `<span class="unassigned">未指派</span>`
+              }
+              ${hasSession ? `<span class="chip session" data-session="${item.id}">⌘ 会话</span>` : ""}
+            </div>
+            ${
+              labels.length
+                ? `<div class="chip-row">${labels
+                    .slice(0, 2)
+                    .map((l) => `<span class="chip label">${l}</span>`)
+                    .join("")}${labels.length > 2 ? `<span class="chip label">+${labels.length - 2}</span>` : ""}</div>`
+                : ""
+            }`;
+      }
+
+      function cardHtml(item) {
+        return `<div class="card" draggable="true" data-id="${item.id}">${cardInnerHtml(item)}</div>`;
+      }
+
+      function renderBoard() {
+        const cols = states
+          .map((s) => {
+            const list = itemsByState(s.id);
+            return `
+            <div class="column" data-state="${s.id}">
+              <div class="column-header">
+                <span class="dot" style="background:${s.color}"></span>
+                <span class="column-name">${s.name}</span>
+                <span class="column-count">${list.length}</span>
+              </div>
+              ${list.map(cardHtml).join("")}
+              ${list.length === 0 ? `<div class="blank">拖到这里</div>` : ""}
+            </div>`;
+          })
+          .join("");
+        return `<div class="board"><div class="board-inner">${cols}</div></div>`;
+      }
+
+      function renderList() {
+        const groups = states
+          .map((s) => {
+            const list = itemsByState(s.id);
+            const isCollapsed = collapsed[s.id] === true;
+            const body = isCollapsed
+              ? ""
+              : `<div class="group-body">${
+                  list.length === 0
+                    ? `<div class="blank">这个状态还没有工作项</div>`
+                    : list
+                        .map(
+                          (item) => `
+                        <div class="card">${cardInnerHtml(item)}</div>
+                        <div class="move-row">
+                          <span class="move-label">移动到</span>
+                          <span class="pill-row">${states
+                            .map(
+                              (t) =>
+                                `<button class="pill ${t.id === item.stateId ? "active" : ""}" data-move="${item.id}" data-target="${t.id}">${t.name}</button>`
+                            )
+                            .join("")}</span>
+                        </div>`
+                        )
+                        .join("")
+                }</div>`;
+            return `
+            <div class="group">
+              <div class="group-header" data-toggle="${s.id}">
+                <span class="chevron">${isCollapsed ? "▸" : "▾"}</span>
+                <span class="dot" style="background:${s.color}"></span>
+                <span class="group-name">${s.name}</span>
+                <span class="group-count">${list.length}</span>
+              </div>
+              ${body}
+            </div>`;
+          })
+          .join("");
+        return `<div class="list">${groups}</div>`;
+      }
+
+      function toastHtml() {
+        if (!toast) return "";
+        return `<div class="toast ${toast.kind === "error" ? "error" : ""}">
+          <span>${toast.message}</span>
+          ${toast.undo ? `<button class="undo" id="undo-btn">撤销</button>` : ""}
+        </div>`;
+      }
+
+      function render() {
+        el("body").innerHTML = (view === "board" ? renderBoard() : renderList()) + toastHtml();
+        document.querySelectorAll(".seg button").forEach((b) =>
+          b.classList.toggle("active", b.dataset.view === view)
+        );
+        el("project-btn").textContent =
+          (projects.find((p) => p.id === selectedProjectId)?.name ?? "项目") + " ▾";
+      }
+
+      function showToast(t) {
+        toast = t;
+        render();
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { toast = null; render(); }, t.kind === "error" ? 8000 : 5000);
+      }
+
+      function moveItem(itemId, targetStateId) {
+        const item = items.find((i) => i.id === itemId);
+        if (!item || item.stateId === targetStateId) return;
+        const fromStateId = item.stateId;
+        const targetName = states.find((s) => s.id === targetStateId)?.name ?? targetStateId;
+        item.stateId = targetStateId;
+        showToast({
+          kind: "success",
+          message: `已移到「${targetName}」`,
+          undo: { itemId, fromStateId, targetStateId },
+        });
+      }
+
+      // ---- 事件 ----
+      document.querySelectorAll(".seg button").forEach((b) =>
+        b.addEventListener("click", () => {
+          view = b.dataset.view;
+          render();
+        })
+      );
+
+      el("project-btn").addEventListener("click", () => {
+        const existing = document.querySelector(".menu");
+        if (existing) { existing.remove(); return; }
+        const menu = document.createElement("div");
+        menu.className = "menu";
+        menu.innerHTML = projects
+          .map(
+            (p) =>
+              `<button class="${p.id === selectedProjectId ? "active" : ""}" data-project="${p.id}">${p.name}</button>`
+          )
+          .join("");
+        menu.addEventListener("click", (e) => {
+          const id = e.target.dataset.project;
+          if (id) { selectedProjectId = id; }
+          menu.remove();
+          render();
+        });
+        document.querySelector(".header").appendChild(menu);
+      });
+
+      el("refresh-btn").addEventListener("click", () => {
+        el("status-dot").className = "dot idle";
+        setTimeout(() => { el("status-dot").className = "dot connected"; render(); }, 400);
+      });
+
+      el("settings-btn").addEventListener("click", () =>
+        showToast({ kind: "error", message: "请在宿主设置里打开 Plane 配置" })
+      );
+
+      el("body").addEventListener("click", (e) => {
+        const move = e.target.closest("[data-move]");
+        if (move) { moveItem(move.dataset.move, move.dataset.target); return; }
+        const toggle = e.target.closest("[data-toggle]");
+        if (toggle) {
+          const id = toggle.dataset.toggle;
+          collapsed[id] = !collapsed[id];
+          render();
+          return;
+        }
+        if (e.target.id === "undo-btn") {
+          const u = toast.undo;
+          const item = items.find((i) => i.id === u.itemId);
+          if (item) item.stateId = u.fromStateId;
+          toast = null;
+          render();
+          return;
+        }
+        if (e.target.dataset.session) {
+          showToast({ kind: "success", message: "已唤起会话（原型：此处跳宿主会话）" });
+        }
+      });
+
+      // 拖拽改状态
+      el("body").addEventListener("dragstart", (e) => {
+        const card = e.target.closest(".card");
+        if (!card) return;
+        card.classList.add("dragging");
+        e.dataTransfer.setData("text/plain", card.dataset.id);
+        e.dataTransfer.effectAllowed = "move";
+      });
+      el("body").addEventListener("dragend", (e) => {
+        const card = e.target.closest(".card");
+        if (card) card.classList.remove("dragging");
+        document.querySelectorAll(".column").forEach((c) => c.classList.remove("drag-over"));
+      });
+      el("body").addEventListener("dragover", (e) => {
+        const col = e.target.closest(".column");
+        if (!col) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        document.querySelectorAll(".column").forEach((c) => c.classList.remove("drag-over"));
+        col.classList.add("drag-over");
+      });
+      el("body").addEventListener("dragleave", (e) => {
+        const col = e.target.closest(".column");
+        if (col) col.classList.remove("drag-over");
+      });
+      el("body").addEventListener("drop", (e) => {
+        const col = e.target.closest(".column");
+        if (!col) return;
+        e.preventDefault();
+        const id = e.dataTransfer.getData("text/plain");
+        col.classList.remove("drag-over");
+        moveItem(id, col.dataset.state);
+      });
+
+      render();
+    </script>
+  </body>
+</html>
