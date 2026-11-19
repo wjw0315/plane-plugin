@@ -4,6 +4,9 @@ import { PlaneSidebarEntry } from "./plane-sidebar-entry";
 import { PlaneSettingsPage } from "./plane-settings-page";
 import { PLANE_SCREEN_ID } from "../shared/plane-ids";
 
+/** 设置页贡献点 id：宿主设置里的入口与「去设置」跳转都用它。 */
+const PLANE_SETTINGS_SCREEN_ID = "plane-settings";
+
 /**
  * 装配 Plane 插件的四个贡献点：
  * - 看板屏幕（`addScreen`）
@@ -18,7 +21,13 @@ export function contributePlane(client: PluginClientContext): () => void {
     client.addScreen({
       id: PLANE_SCREEN_ID,
       title: "Plane 任务看板",
-      Component: PlaneScreen,
+      // 顶栏的「⚙ 设置」需要跳宿主设置页，这里把跳转动作注入屏幕
+      Component: (screenProps) => (
+        <PlaneScreen
+          {...screenProps}
+          onOpenSettings={() => client.openSettings(PLANE_SETTINGS_SCREEN_ID)}
+        />
+      ),
     }),
     client.addSidebarHeaderItem({
       id: "plane-sidebar",
@@ -36,7 +45,7 @@ export function contributePlane(client: PluginClientContext): () => void {
       },
     }),
     client.addSettingsScreen({
-      id: "plane-settings",
+      id: PLANE_SETTINGS_SCREEN_ID,
       title: "Plane",
       icon: "Blocks",
       Component: PlaneSettingsPage,

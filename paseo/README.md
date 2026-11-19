@@ -38,10 +38,23 @@ paseo/
     plane-api.ts           Plane v2 REST API 客户端（X-Api-Key 认证、PlaneApiError）
     plane-webhook.ts       Webhook 签名校验与 HTTP 服务器
   client/
-    plane-screen.tsx       看板屏幕（项目切换、动态列、拖拽改状态）
+    plane-screen.tsx       看板屏幕（数据装配 + 状态编排，具体视图见 client/plane/）
+    plane/                 看板页面组件（按设计稿拆分）
+      tokens.ts            尺寸 / 颜色 token（设计稿 §2）
+      types.ts             看板数据类型
+      labels.ts            标签解析（会话 id 提取、uuid 标签过滤）
+      header.tsx           顶栏（状态点 / 视图段控件 / 项目 / 刷新 / 设置）
+      board-view.tsx       列视图（横向列 + 拖拽改状态）
+      list-view.tsx        列表视图（分组折叠 + 「移动到」状态 pill）
+      card.tsx             工作项卡片
+      chips.tsx            优先级 / 标签 / 头像 / 会话 chip
+      toast.tsx            底部 toast（成功带撤销 / 失败提示）
+      prototype-preview.html 设计稿单文件预览原型（零依赖 mock，非生产代码）
     plane-sidebar-entry.tsx 侧边栏头部入口
     plane-contribute.tsx   装配 screen / sidebar / command center / settings 四个贡献点
     plane-settings-page.tsx 配置设置页
+  docs/
+    paseo-插件页面-设计稿.md 看板页面设计稿 v1.0（骨架 / token / 组件规格 / 交互清单）
   shared/
     plane-config.ts        配置字段的纯定义（zod schema + PlaneConfig 类型）
     plane-settings.ts      Paseo 设置项注册（defineSettings，包装 plane-config）
