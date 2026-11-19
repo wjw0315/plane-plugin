@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<!-- 一次性原型：Plane → OpenChamber rail 面板。三种布局 + 任务详情交互。
+     用 ?variant=A|B|C 或底部浮动条切换；无持久化，数据写死在脚本里。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · Plane 面板（3 变体 + 任务详情）</title>
+<style>
+  :root{
+    --bg:#0d0f12; --bg2:#121519; --bg3:#171b20; --line:#252b33; --line2:#2f3742;
+    --fg:#e6e9ee; --fg2:#9aa4b2; --fg3:#6b7482; --r:10px;
+  }
+  *{box-sizing:border-box}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:#2b333d;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif;overflow:hidden}
+  .app{display:flex;height:100vh}
+  .activity{width:44px;flex:0 0 44px;background:#0a0c0f;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:14px;padding:12px 0}
+  .activity i{width:20px;height:20px;border-radius:6px;background:#1c2229;display:block}
+  .activity i.on{background:#2c3540;box-shadow:inset 0 0 0 1px #3b4652}
+  .center{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg2)}
+  .center .top{height:40px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 12px;color:var(--fg3);font-size:12px}
+  .center .body{flex:1;overflow:auto;padding:14px}
+  .msg{max-width:78%;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#1a1f26;color:var(--fg2);font-size:12px;white-space:pre-wrap}
+  .msg.me{margin-left:auto;background:#1f2937;color:#cfd8e3}
+  .center .input{margin:10px 12px 12px;height:34px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;padding:0 10px;color:var(--fg3);font-size:12px;background:#141a20}
+  .panel{flex:0 0 var(--pw,380px);width:var(--pw,380px);border-left:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;min-height:0;position:relative}
+  .phead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .phead h1{font-size:12px;margin:0;font-weight:600;letter-spacing:.02em}
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden}
+  .seg button{border:0;background:#141a20;color:var(--fg3);font-size:10.5px;padding:2px 7px;cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line2)}
+  .seg button[aria-pressed=true]{background:#1d2733;color:var(--fg)}
+  .dot{width:6px;height:6px;border-radius:50%;background:#4ade80;flex:0 0 6px}
+  .grow{flex:1}
+  .btn{background:#1b2128;border:1px solid var(--line2);color:var(--fg2);border-radius:7px;font-size:11px;padding:3px 7px;cursor:pointer}
+  .btn:hover{color:var(--fg);border-color:#3b4652}
+  .btn.pri{background:#1d2733;border-color:#3b5163;color:#dbe6f0}
+  select.btn{appearance:none;max-width:150px}
+  .panelwrap{position:relative;display:flex;flex-direction:column;flex:1;min-height:0}
+  .pbody{flex:1;min-height:0;overflow:auto;padding:10px 12px 12px}
+  .statebar{border-top:1px solid var(--line);background:#0a0d10;padding:6px 12px;font-size:11px;color:var(--fg3)}
+  .statebar summary{cursor:pointer;outline:none}
+  .statebar pre{margin:6px 0 0;max-height:110px;overflow:auto;color:#8ea0b5;font-size:10px;line-height:1.45}
+  /* 卡片 */
+  .card{background:var(--bg3);border:1px solid var(--line);border-radius:var(--r);padding:8px 9px;margin-bottom:7px;cursor:pointer}
+  .card:hover{border-color:#34404d}
+  .card.drag{opacity:.4}
+  .card.sel{border-color:#3b5163;background:#141c25}
+  .card .t{font-size:12px;line-height:1.35;margin-bottom:6px}
+  .meta{display:flex;align-items:center;gap:6px;color:var(--fg3);font-size:10.5px}
+  .ident{font-variant-numeric:tabular-nums;color:#7f8b9a}
+  .chip{border-radius:999px;padding:0 6px;font-size:10px;line-height:16px;border:1px solid transparent}
+  .p-urgent{color:#f87171;border-color:#3d2224;background:#241618}
+  .p-high{color:#fbbf24;border-color:#3d3320;background:#241f14}
+  .p-med{color:#60a5fa;border-color:#213341;background:#141e26}
+  .p-low{color:#6b7482;border-color:#2a3038;background:#191d22}
+  .avatar{width:16px;height:16px;border-radius:50%;background:#2b3542;color:#c7d2de;font-size:9px;display:inline-flex;align-items:center;justify-content:center}
+  .sess{color:#a78bfa;border-color:#35295a;background:#1b1630;cursor:pointer}
+  .chip.ok{color:#4ade80;border-color:#1f3b2b;background:#0f1f18}
+  .chip.busy{color:#fbbf24;border-color:#3d3320;background:#241f14}
+  .lbl{width:5px;height:5px;border-radius:50%;background:#475569;display:inline-block}
+  /* A 列式 */
+  .cols{display:flex;gap:8px;align-items:flex-start;overflow-x:auto;padding-bottom:6px}
+  .col{flex:0 0 152px;background:#0f1318;border:1px solid var(--line);border-radius:10px;padding:7px;min-height:90px}
+  .col.over{border-color:#3f6ea8;background:#101823}
+  .col h2{font-size:10.5px;margin:0 0 7px;color:var(--fg2);font-weight:600;display:flex;gap:6px;align-items:center}
+  .col h2 .n{color:var(--fg3);font-weight:400}
+  /* B 分组 */
+  .group{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#0f1318}
+  .group>summary{list-style:none;cursor:pointer;padding:7px 9px;display:flex;align-items:center;gap:7px;font-size:11px;color:var(--fg2);background:#11161c}
+  .group>summary::-webkit-details-marker{display:none}
+  .group .in{padding:8px}
+  .moveto{margin-top:6px;display:flex;gap:6px;align-items:center;color:var(--fg3);font-size:10px}
+  /* C 聚焦 */
+  .tabs{display:flex;gap:4px;overflow-x:auto;margin-bottom:9px}
+  .tab{flex:0 0 auto;border:1px solid var(--line);background:#11161c;color:var(--fg2);border-radius:999px;padding:3px 9px;font-size:11px;cursor:pointer;white-space:nowrap}
+  .tab[aria-pressed=true]{background:#1d2733;border-color:#3b5163;color:var(--fg)}
+  .big .card{padding:10px}
+  .movebtns{display:flex;gap:5px;margin-top:7px;margin-bottom:10px}
+  /* 详情：覆盖式二级页（A） */
+  .overlay{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:20;animation:slidein .16s ease-out}
+  @keyframes slidein{from{transform:translateX(14px);opacity:.5}to{transform:none;opacity:1}}
+  .dhead{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+  .dhead .back{cursor:pointer;color:var(--fg2);font-size:14px;padding:0 4px}
+  .dbody{flex:1;overflow:auto;padding:12px}
+  /* 详情：底部抽屉（C） */
+  .sheetwrap{position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end}
+  .mask{position:absolute;inset:0;background:#000a}
+  .sheet{position:relative;width:100%;max-height:78%;overflow:auto;background:var(--bg);border-top:1px solid var(--line2);border-radius:14px 14px 0 0;padding:0 0 10px}
+  .grab{display:block;width:34px;height:3px;border-radius:2px;background:#39424d;margin:7px auto 4px}
+  /* 详情：就地展开（B） */
+  .inlineD{border-top:1px dashed var(--line2);margin-top:8px;padding-top:8px;cursor:default}
+  /* 详情通用原子 */
+  .dtitle{font-size:13.5px;line-height:1.4;margin:0 0 9px}
+  .frow{display:flex;gap:8px;align-items:flex-start;margin-bottom:9px;font-size:11px;color:var(--fg3)}
+  .frow .k{min-width:40px;color:var(--fg3);padding-top:2px}
+  .statebtns{display:flex;flex-wrap:wrap;gap:4px}
+  .statebtn{border:1px solid var(--line);background:#141a20;color:var(--fg2);border-radius:999px;padding:2px 8px;font-size:10.5px;cursor:pointer}
+  .statebtn[aria-pressed=true]{background:#1d2733;border-color:#3b5163;color:var(--fg)}
+  .statebtn:hover{border-color:#3b4652;color:var(--fg)}
+  .sec{border-top:1px solid var(--line);margin-top:11px;padding-top:9px}
+  .sec h3{font-size:10.5px;color:var(--fg3);margin:0 0 6px;font-weight:600}
+  .desc{font-size:11.5px;color:var(--fg2);line-height:1.65;white-space:pre-wrap}
+  .acts{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+  /* 发起会话抽屉 */
+  .grid{display:flex;flex-direction:column;gap:7px}
+  .fld{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--fg3)}
+  .fld>span:first-child{min-width:52px}
+  .fld select,.fld input[type=text]{flex:1;background:#141a20;border:1px solid var(--line2);color:var(--fg2);
+    border-radius:7px;font-size:11px;padding:3px 6px;min-width:0}
+  .fld input[type=checkbox]{accent-color:#3b82f6}
+  .wtrow{display:none;gap:6px;flex:1}
+  .wtrow.on{display:flex}
+  .pv{background:#0f1318;border:1px solid var(--line);border-radius:8px;padding:8px;
+    font:10.5px/1.6 ui-monospace,Menlo,monospace;color:#9fb0c4;white-space:pre-wrap;max-height:96px;overflow:auto;margin:0}
+  /* 空/错误/吐司 */
+  .surface{border:1px dashed var(--line2);border-radius:12px;padding:16px;text-align:center;color:var(--fg2)}
+  .surface .code{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#fbbf24;margin:6px 0}
+  .toast{position:absolute;left:12px;right:12px;bottom:10px;background:#1b2129;border:1px solid var(--line2);border-radius:9px;padding:7px 9px;font-size:11px;color:var(--fg2);display:flex;gap:8px;align-items:center;box-shadow:0 8px 24px #0009;z-index:40}
+  .toast .undo{margin-left:auto;color:#7dd3fc;cursor:pointer;white-space:nowrap}
+  /* 浮动切换条 */
+  .switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:50;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:999px;background:#f8fafc;color:#0b0e12;box-shadow:0 10px 30px #000a;font-size:12px;font-weight:600}
+  .switcher button{border:0;background:#0b0e12;color:#f8fafc;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1}
+  .switcher .w{display:flex;align-items:center;gap:6px;font-weight:500;color:#334155;border-left:1px solid #cbd5e1;padding-left:10px;font-size:11px}
+  .switcher input[type=range]{width:64px}
+  @media (max-width:900px){.center{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="activity" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i></nav>
+  <main class="center" aria-hidden="true">
+    <div class="top"><span>opencode</span><span class="grow"></span><span>ses_9f1c</span></div>
+    <div class="body">
+      <div class="msg">帮我把 XLMSC-24 的报表导出补上缺失的两列。</div>
+      <div class="msg me">先看一下当前看板里有哪些在推进的任务。</div>
+      <div class="msg">好，右侧面板里 In Progress 有 3 张卡，其中 2 张绑着会话。</div>
+    </div>
+    <div class="input">问点什么…</div>
+  </main>
+
+  <aside class="panel" id="panel">
+    <div class="phead"><span class="dot"></span><h1>Plane</h1><span class="grow"></span>[PROJ][REF]</div>
+    <div class="panelwrap">
+      <div class="pbody" id="body"></div>
+      <div id="detail"></div>
+      <div id="toast"></div>
+    </div>
+    <details class="statebar"><summary>状态快照（原型调试）· 模拟错误</summary>
+      <label style="display:block;margin-top:6px"><input type="checkbox" id="err"> 模拟加载失败（NETWORK）</label>
+      <pre id="dump"></pre>
+    </details>
+  </aside>
+</div>
+
+<div class="switcher" role="group" aria-label="原型变体切换">
+  <button id="prev" aria-label="上一个变体">‹</button><span id="label">A</span><button id="next" aria-label="下一个变体">›</button>
+  <span class="w">宽度<input type="range" id="width" min="300" max="560" step="20" value="380"></span>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var STATES = ["Backlog","Todo","In Progress","Done","Cancelled"];
+  var PROJECTS = [{id:"xlm-scrm",name:"xlm-scrm"},{id:"internal",name:"internal（空）"}];
+  var ITEMS = [
+    {id:"31",t:"客户列表分页错乱",s:"Backlog",p:"urgent",a:"JW",sess:null,labels:0,desc:"第二页之后列表会把第 1 页的数据重复渲染，翻页参数 offset 算成了 page*size。\n复现：客户列表 → 第 2 页 → 滚动到底。"},
+    {id:"29",t:"SCRM 线索导入超时",s:"Backlog",p:"high",a:"YC",sess:null,labels:0,desc:"5000 条以上的 Excel 导入 30s 后网关 504，导入任务其实还在后台跑。"},
+    {id:"27",t:"标签管理支持批量编辑",s:"Todo",p:"med",a:"LZ",sess:null,labels:2,desc:"选中多个标签后统一改颜色或合并。"},
+    {id:"26",t:"会话自动归档开关",s:"Todo",p:"low",a:"JW",sess:null,labels:0,desc:"在设置里给会话列表加「闲置 N 天自动归档」。"},
+    {id:"24",t:"报表导出缺列",s:"In Progress",p:"urgent",a:"YC",sess:"ses_9f1c",labels:1,desc:"导出的 CSV 只有 6 列，缺「渠道」和「到店日期」。\n数据源里两个字段都在，是导出映射表漏配。"},
+    {id:"23",t:"Webhook 重试策略",s:"In Progress",p:"high",a:"LZ",sess:null,labels:0,desc:"失败重试从固定 3 次改成指数退避，上限 5 分钟。"},
+    {id:"21",t:"权限矩阵补测",s:"In Progress",p:"med",a:"JW",sess:"ses_7a02",labels:0,desc:"店长/美容师/区域经理三个角色交叉 12 个页面。"},
+    {id:"19",t:"登录页文案矫正",s:"Done",p:"low",a:"YC",sess:null,labels:0,desc:"「忘记密码」→「忘记密码？」"},
+    {id:"18",t:"线索去重脚本",s:"Done",p:"med",a:"LZ",sess:null,labels:1,desc:"一次性脚本，按手机号 + 来源去重。"},
+    {id:"16",t:"旧版看板下线",s:"Cancelled",p:"low",a:"JW",sess:null,labels:0,desc:"被新看板替代，不再做。"},
+    {id:"15",t:"移动端适配评估",s:"Cancelled",p:"med",a:"YC",sess:null,labels:0,desc:"排期后延。"}
+  ];
+  var VARIANTS = [["A","列式看板 + 覆盖详情"],["B","分组列表 + 就地展开"],["C","聚焦单列 + 底部抽屉"]];
+  var PRIO = {urgent:"紧急",high:"高",med:"中",low:"低"};
+  var PEOPLE = {JW:"jw",YC:"yc",LZ:"lz"};
+  var S = {variant:"A",project:"xlm-scrm",items:ITEMS.slice(),error:false,lastAction:"初始化",dragging:null,detail:null,tab:"Backlog",
+           concl:{}, busy:null, conclFor:null, draft:"", startFor:null};
+  var MODELS = ["anthropic/claude-sonnet-5","openai/gpt-5.2","deepseek/deepseek-v4-flash","magpie/glm-5.3"];
+  var THINK = ["default","low","medium","high"];
+  var AGENTS = ["build","plan"];
+
+  function byState(st){ return S.items.filter(function(i){ return i.s===st; }); }
+  function item(id){ return S.items.filter(function(i){ return i.id===id; })[0]; }
+  function esc(v){ return String(v).replace(/[&<>"]/g,function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]; }); }
+
+  function card(it){
+    var sel = S.detail===it.id ? " sel" : "";
+    return '<div class="card'+sel+'" draggable="true" data-id="'+it.id+'">'
+      + '<div class="t">'+esc(it.t)+'</div>'
+      + '<div class="meta">'
+      +   '<span class="ident">XLMSC-'+it.id+'</span>'
+      +   '<span class="chip p-'+it.p+'">'+PRIO[it.p]+'</span>'
+      +   '<span class="avatar">'+it.a+'</span>'
+      +   (it.labels?'<span class="lbl"></span>'.repeat(it.labels):'')
+      +   '<span class="grow"></span>'
+      +   (it.sess?'<span class="chip sess" data-open="'+it.sess+'">⌘ 会话</span>':'')
+      +   (S.concl[it.id]?'<span class="chip ok" title="已回填结论">✓ 结论</span>':'')
+      + '</div></div>';
+  }
+
+  // ---- 详情内容（三个变体共用同一套字段，差别只在呈现方式）----
+  function detailFields(it, inline){
+    var c = S.concl[it.id];
+    var h = '<h2 class="dtitle">'+esc(it.t)+'</h2>';
+    h += '<div class="frow"><span class="k">状态</span><span class="statebtns">'
+       + STATES.map(function(st){
+           return '<button class="statebtn" data-setstate="'+it.id+'" data-to="'+st+'" aria-pressed="'+(it.s===st)+'">'+st+'</button>';
+         }).join('')
+       + '</span></div>';
+    h += '<div class="frow"><span class="k">编号</span><span class="ident">XLMSC-'+it.id+'</span></div>';
+    h += '<div class="frow"><span class="k">优先级</span><span class="chip p-'+it.p+'">'+PRIO[it.p]+'</span></div>';
+    h += '<div class="frow"><span class="k">指派</span><span class="avatar">'+it.a+'</span>&nbsp;'+PEOPLE[it.a]+'</div>';
+    // 会话：未绑定时可直接发起
+    h += '<div class="frow"><span class="k">会话</span>';
+    if(S.busy===it.id){
+      h += '<span class="chip busy">正在起会话…</span>';
+    } else if(it.sess){
+      h += '<span class="chip sess" data-open="'+it.sess+'">⌘ '+it.sess+' · 跳转</span>';
+    } else {
+      h += '<button class="btn pri" data-start="'+it.id+'">发起会话</button>'
+         + '<span style="color:#6b7482;margin-left:7px">用编号+标题+描述起一个新会话</span>';
+    }
+    h += '</div>';
+    // 结论
+    h += '<div class="sec"><h3>结论</h3>';
+    if(c){
+      h += '<div class="desc">'+esc(c.text)+'</div>'
+         + '<div style="font-size:10.5px;color:#4ade80;margin-top:6px">✓ 已回填到 Plane 评论 · '+esc(c.at)+'</div>';
+    } else if(it.sess){
+      h += '<div style="font-size:11px;color:#6b7482">会话进行中 · <span style="color:#4ade80">自动回填已开启</span>（turn-finished 时写入评论）。也可以现在手动回填。</div>';
+    } else {
+      h += '<div style="font-size:11px;color:#6b7482">还没有结论。</div>';
+    }
+    h += '</div>';
+    h += '<div class="sec"><h3>描述</h3><div class="desc">'+esc(it.desc)+'</div></div>';
+    h += '<div class="acts">';
+    if(!c) h += '<button class="btn pri" data-backfill="'+it.id+'">回填结论…</button>';
+    h += '<button class="btn" data-plane="'+it.id+'">在 Plane 打开 ↗</button>'
+       + '<button class="btn" data-copy="'+it.id+'">复制链接</button>'
+       + (inline? '' : '<button class="btn" data-close="1">关闭</button>');
+    h += '</div>';
+    return h;
+  }
+
+  // 回填抽屉：结论是可编辑草稿，确认才写评论
+  function prefillText(it){
+    var map = {
+      "24":"已补上「渠道」「到店日期」两列，导出映射表加 2 条映射。\n验证：3 个月样本数据导出，列数与顺序与需求一致。\n遗留：CRM 渠道枚举还缺 3 个新来源，另开卡。",
+      "21":"三个角色 × 12 个页面的权限矩阵补测完成，发现 2 处越权（店长可进区域报表），已回归。",
+      "31":"翻页 offset 改为 (page-1)*size，第 2/3 页验证无重复。"
+    };
+    return map[it.id] || ("已完成「"+it.t+"」。\n改动：\n验证：\n遗留：");
+  }
+  function conclSheetHTML(it){
+    return '<div class="sheetwrap"><div class="mask" data-concl-cancel="1"></div><div class="sheet">'
+      + '<span class="grab"></span>'
+      + '<div style="padding:2px 12px 12px">'
+      + '<div style="font-size:12.5px;margin-bottom:4px">回填结论到 XLMSC-'+it.id+'</div>'
+      + '<div style="font-size:10.5px;color:#6b7482;margin-bottom:8px">作为评论追加到 Plane，不改动原描述</div>'
+      + '<textarea id="conclText" style="width:100%;height:118px;background:#0f1318;border:1px solid var(--line2);border-radius:8px;color:#e6e9ee;font:11.5px/1.65 -apple-system,system-ui,sans-serif;padding:8px;resize:vertical">'+esc(S.draft)+'</textarea>'
+      + '<div class="acts"><button class="btn pri" data-concl-ok="'+it.id+'">写入评论</button>'
+      + '<button class="btn" data-concl-cancel="1">取消</button></div>'
+      + '</div></div></div>';
+  }
+  function overlayHTML(it){
+    return '<div class="overlay" data-layer="overlay">'
+      + '<div class="dhead"><span class="back" data-close="1">‹</span><span class="ident">XLMSC-'+it.id+'</span>'
+      + '<span class="grow"></span><span style="font-size:10.5px;color:#6b7482">Esc 返回</span></div>'
+      + '<div class="dbody">'+detailFields(it,false)+'</div></div>';
+  }
+  function sheetHTML(it){
+    return '<div class="sheetwrap" data-layer="sheet"><div class="mask" data-close="1"></div>'
+      + '<div class="sheet"><span class="grab"></span>'
+      + '<div style="padding:0 12px 4px">'+detailFields(it,false)+'</div></div></div>';
+  }
+
+  // 发起会话：配置抽屉（项目 / worktree / 模型 / 思考级别 / 智能体 / 补充提示词）
+  function promptPreview(it){
+    var el = document.getElementById("fExtra");
+    var extra = el ? el.value : "";
+    return "XLMSC-"+it.id+" "+it.t+"\n\n"+it.desc+(extra? "\n\n"+extra : "")+"\n\n完成后总结：改了什么、怎么验证、遗留什么。";
+  }
+  function startSheetHTML(it){
+    return '<div class="sheetwrap"><div class="mask" data-start-cancel="1"></div><div class="sheet" style="max-height:94%">'
+      + '<span class="grab"></span><div style="padding:2px 12px 12px">'
+      + '<div style="font-size:12.5px">发起会话 · XLMSC-'+it.id+'</div>'
+      + '<div style="font-size:10.5px;color:#6b7482;margin:2px 0 10px">任务内容自动带上，下面只选这次运行的参数</div>'
+      + '<div class="grid">'
+      + '<label class="fld"><span>项目</span><select id="fProject">'
+      +   PROJECTS.map(function(p){ return '<option value="'+p.id+'"'+(S.project===p.id?' selected':'')+'>'+p.name+'</option>'; }).join('')
+      + '</select></label>'
+      + '<label class="fld"><span>工作区</span><input type="checkbox" id="fWt"><span style="color:var(--fg2)">全新 worktree</span>'
+      +   '<span class="wtrow" id="wtRow"><input type="text" id="fWtName" value="oc-'+it.id+'"><input type="text" id="fBase" value="main"></span>'
+      + '</label>'
+      + '<label class="fld"><span>模型</span><select id="fModel">'
+      +   MODELS.map(function(m){ return '<option>'+m+'</option>'; }).join('') + '</select></label>'
+      + '<label class="fld"><span>思考级别</span><select id="fVariant">'
+      +   THINK.map(function(v){ return '<option>'+v+'</option>'; }).join('') + '</select></label>'
+      + '<label class="fld"><span>智能体</span><select id="fAgent">'
+      +   AGENTS.map(function(a){ return '<option>'+a+'</option>'; }).join('') + '</select></label>'
+      + '</div>'
+      + '<div style="font-size:10.5px;color:#6b7482;margin:9px 0 4px">补充提示词</div>'
+      + '<textarea id="fExtra" style="height:50px" placeholder="约束、验收标准、不要碰的文件…"></textarea>'
+      + '<div style="font-size:10.5px;color:#6b7482;margin:9px 0 4px">将发送</div>'
+      + '<pre class="pv" id="fPreview">'+esc(promptPreview(it))+'</pre>'
+      + '<div class="acts"><button class="btn pri" data-start-go="'+it.id+'">开始会话</button>'
+      + '<button class="btn" data-start-cancel="1">取消</button></div>'
+      + '</div></div></div>';
+  }
+  function variantA(){
+    var h = '<div class="cols">';
+    STATES.forEach(function(st){
+      var l = byState(st);
+      h += '<div class="col" data-state="'+st+'"><h2>'+st+' <span class="n">'+l.length+'</span></h2>'+l.map(card).join('')+'</div>';
+    });
+    return h + '</div>';
+  }
+  function variantB(){
+    var h = '';
+    STATES.forEach(function(st){
+      var l = byState(st);
+      h += '<details class="group" open><summary>'+st+' <span class="ident">'+l.length+'</span></summary><div class="in">';
+      if(!l.length) h += '<div style="color:#6b7482;font-size:11px">暂无工作项</div>';
+      l.forEach(function(it){
+        h += card(it);
+        if(S.detail===it.id) h += '<div class="inlineD">'+detailFields(it,true)+'</div>';
+        else h += '<div class="moveto">移动到 <select class="btn" data-move="'+it.id+'">'
+              + STATES.map(function(s2){ return '<option'+(s2===it.s?' selected':'')+'>'+s2+'</option>'; }).join('')
+              + '</select></div>';
+      });
+      h += '</div></details>';
+    });
+    return h;
+  }
+  function variantC(){
+    var h = '<div class="tabs">';
+    STATES.forEach(function(st){
+      h += '<button class="tab" data-tab="'+st+'" aria-pressed="'+(S.tab===st)+'">'+st+' '+byState(st).length+'</button>';
+    });
+    h += '</div><div class="big">';
+    var l = byState(S.tab);
+    if(!l.length) h += '<div class="surface">这一列还没有工作项</div>';
+    l.forEach(function(it){
+      h += card(it);
+      var i = STATES.indexOf(it.s);
+      h += '<div class="movebtns">'
+        +  (i>0?'<button class="btn" data-step="-1" data-id="'+it.id+'">← '+STATES[i-1]+'</button>':'')
+        +  (i<STATES.length-1?'<button class="btn" data-step="1" data-id="'+it.id+'">'+STATES[i+1]+' →</button>':'')
+        +  '</div>';
+    });
+    return h + '</div>';
+  }
+
+  function render(){
+    document.getElementById("label").textContent = S.variant+" ("+VARIANTS.filter(function(v){return v[0]===S.variant;})[0][1]+")";
+    var body = document.getElementById("body");
+    var det = document.getElementById("detail");
+    det.innerHTML = "";
+
+    if(S.error){
+      body.innerHTML = '<div class="surface"><div style="font-size:12px;color:#e6e9ee">加载失败</div>'
+        + '<div class="code">PLANE_NETWORK</div><div style="font-size:11px">连不上 Plane 实例，已自动重试 1 次</div>'
+        + '<div style="margin-top:10px"><button class="btn" id="retry">重试</button></div></div>';
+      var r = document.getElementById("retry");
+      if(r) r.onclick = function(){ S.error=false; S.lastAction="重试成功"; render(); toast("已重新拉取"); };
+    } else if(S.project==="internal"){
+      body.innerHTML = '<div class="surface"><div style="font-size:12px;color:#e6e9ee">这个项目还没有工作项</div>'
+        + '<div class="code">EMPTY</div><div style="font-size:11px">切换到 xlm-scrm 看看</div></div>';
+    } else {
+      body.innerHTML = S.variant==="A"? variantA() : S.variant==="B"? variantB() : variantC();
+      // 覆盖式详情（A）与底部抽屉（C）挂在面板层，B 已在列表里就地展开
+      if(S.detail && S.variant==="A") det.innerHTML = overlayHTML(item(S.detail));
+      if(S.detail && S.variant==="C") det.innerHTML = sheetHTML(item(S.detail));
+      if(S.conclFor) det.innerHTML += conclSheetHTML(item(S.conclFor));
+      if(S.startFor) det.innerHTML += startSheetHTML(item(S.startFor));
+    }
+    wire(body); wire(det);
+    dump();
+  }
+
+  function dump(){
+    var c = {}; STATES.forEach(function(st){ c[st] = byState(st).length; });
+    document.getElementById("dump").textContent = JSON.stringify({
+      variant:S.variant, project:S.project, counts:c, tab:S.tab, detail:S.detail,
+      sessionOfDetail: S.detail? (item(S.detail)||{}).sess : null,
+      conclKeys:Object.keys(S.concl), backfillOpen:S.conclFor, draftLen:S.draft.length, startOpen:S.startFor,
+      error:S.error, dragging:S.dragging, lastAction:S.lastAction
+    }, null, 2);
+  }
+
+  function toast(text, undo){
+    var box = document.getElementById("toast");
+    box.innerHTML = '<div class="toast"><span>'+esc(text)+'</span>'+(undo?'<span class="undo" id="undo">撤销</span>':'')+'</div>';
+    var u = document.getElementById("undo");
+    if(u) u.onclick = function(){ undo(); box.innerHTML=""; };
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ box.innerHTML=""; }, undo? 5000 : 2200);
+  }
+
+  function openDetail(id){
+    if(S.detail === id){ S.lastAction = "收起详情 XLMSC-"+id; S.detail = null; render(); return; }
+    S.detail = id; S.lastAction = "打开详情 XLMSC-"+id; render();
+  }
+  function closeDetail(){
+    S.lastAction = "关闭详情"; S.detail = null; render();
+  }
+  function moveItem(id, to){
+    var it = item(id);
+    if(!it || it.s===to) return;
+    var from = it.s;
+    it.s = to;
+    S.lastAction = "移动 XLMSC-"+id+"："+from+" → "+to;
+    if(S.variant==="C") S.tab = to;
+    render();
+    toast("XLMSC-"+id+" 已移到 "+to, function(){ it.s = from; render(); toast("已撤销"); });
+  }
+
+  function wire(root){
+    // 卡片：点击开详情，拖拽改状态
+    root.querySelectorAll(".card[draggable]").forEach(function(el){
+      el.addEventListener("click", function(e){
+        if(el.classList.contains("drag")) return;
+        if(e.target.closest("[data-open]")) return;
+        openDetail(el.dataset.id);
+      });
+      el.addEventListener("dragstart", function(e){
+        S.dragging = el.dataset.id; dump(); el.classList.add("drag");
+        try{ e.dataTransfer.setData("text/plain", el.dataset.id); }catch(_){}
+      });
+      el.addEventListener("dragend", function(){ S.dragging=null; el.classList.remove("drag"); dump(); });
+    });
+    // 列：拖放目标（A）
+    root.querySelectorAll('.col[data-state]').forEach(function(col){
+      col.addEventListener("dragover", function(e){ e.preventDefault(); col.classList.add("over"); });
+      col.addEventListener("dragleave", function(){ col.classList.remove("over"); });
+      col.addEventListener("drop", function(e){
+        e.preventDefault(); col.classList.remove("over");
+        var id = S.dragging || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
+        moveItem(id, col.dataset.state);
+      });
+    });
+    // B：移动到
+    root.querySelectorAll("[data-move]").forEach(function(sel){
+      sel.addEventListener("change", function(){ moveItem(sel.dataset.move, sel.value); });
+    });
+    // C：Tab 与步进
+    root.querySelectorAll("[data-tab]").forEach(function(b){
+      b.addEventListener("click", function(){ S.tab = b.dataset.tab; S.lastAction="切换到 "+S.tab; render(); });
+    });
+    root.querySelectorAll("[data-step]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        var it = item(b.dataset.id);
+        moveItem(it.id, STATES[STATES.indexOf(it.s)+Number(b.dataset.step)]);
+      });
+    });
+    // 详情内的动作
+    root.querySelectorAll("[data-setstate]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        moveItem(b.dataset.setstate, b.dataset.to);
+      });
+    });
+    root.querySelectorAll("[data-open]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.lastAction = "打开会话 "+b.dataset.open; dump();
+        toast("打开会话 "+b.dataset.open);
+      });
+    });
+    root.querySelectorAll("[data-plane]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.lastAction = "外部打开 XLMSC-"+b.dataset.plane; dump();
+        toast("在浏览器打开 plane…/xlm-scrm/issues/"+b.dataset.plane);
+      });
+    });
+    root.querySelectorAll("[data-copy]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.lastAction = "复制 XLMSC-"+b.dataset.copy+" 链接"; dump();
+        toast("已复制 XLMSC-"+b.dataset.copy+" 链接");
+      });
+    });
+    root.querySelectorAll("[data-close]").forEach(function(b){
+      b.addEventListener("click", function(e){ e.stopPropagation(); closeDetail(); });
+    });
+    // 任务 → 发起会话（先开配置抽屉）
+    root.querySelectorAll("[data-start]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.startFor = b.dataset.start; S.lastAction = "打开发起会话 XLMSC-"+b.dataset.start; render();
+      });
+    });
+    root.querySelectorAll("[data-start-cancel]").forEach(function(b){
+      b.addEventListener("click", function(e){ e.stopPropagation(); S.startFor = null; render(); });
+    });
+    var wt = document.getElementById("fWt");
+    if(wt) wt.addEventListener("change", function(){
+      var row = document.getElementById("wtRow");
+      if(row) row.classList.toggle("on", wt.checked);
+    });
+    var extra = document.getElementById("fExtra");
+    if(extra){
+      var syncPreview = function(){
+        var it = item(S.startFor);
+        var pv = document.getElementById("fPreview");
+        if(pv && it) pv.textContent = promptPreview(it);
+      };
+      extra.addEventListener("input", syncPreview);
+      extra.addEventListener("change", syncPreview);
+    }
+    root.querySelectorAll("[data-start-go]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        var id = b.dataset.startGo;
+        var g = function(x){ var el = document.getElementById(x); return el ? el.value : ""; };
+        var wtOn = wt && wt.checked;
+        var spec = g("fModel")+" · "+g("fVariant")+" · "+g("fAgent") + (wtOn? " · worktree "+g("fWtName")+"@"+g("fBase") : "");
+        S.startFor = null; S.busy = id;
+        S.lastAction = "发起会话 XLMSC-"+id+"（"+spec+"）";
+        render();
+        setTimeout(function(){
+          var it = item(id);
+          it.sess = "ses_" + Math.random().toString(16).slice(2,6);
+          it.s = "In Progress";
+          S.busy = null;
+          S.lastAction = "会话已创建并绑定 XLMSC-"+id+"；自动回填已开启";
+          render();
+          toast("会话已创建 → 自动回填已开启（turn-finished 时写评论）");
+        }, 600);
+      });
+    });
+    // 会话 → 回填结论
+    root.querySelectorAll("[data-backfill]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        var it = item(b.dataset.backfill);
+        S.conclFor = it.id; S.draft = prefillText(it);
+        S.lastAction = "打开回填草稿 XLMSC-"+it.id; render();
+      });
+    });
+    root.querySelectorAll("[data-concl-ok]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.concl[b.dataset.conclOk] = { text:S.draft, at:"刚刚" };
+        S.conclFor = null; S.lastAction = "已回填评论 XLMSC-"+b.dataset.conclOk;
+        render(); toast("已写入 Plane 评论（评论接口实测 201）");
+      });
+    });
+    root.querySelectorAll("[data-concl-cancel]").forEach(function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        S.conclFor = null; S.lastAction = "取消回填"; render();
+      });
+    });
+    var ta = document.getElementById("conclText");
+    if(ta) ta.addEventListener("input", function(){ S.draft = ta.value; });
+  }
+
+  function setVariant(v){
+    S.variant = v; S.detail = null;
+    try{ history.replaceState(null, "", "?variant="+v); }catch(_){}
+    try{ localStorage.setItem("plane.view", v); }catch(_){}
+    render();
+  }
+
+  // ---- 启动 ----
+  var q = null; try{ q = new URLSearchParams(location.search).get("variant"); }catch(_){}
+  var saved = null; try{ saved = localStorage.getItem("plane.view"); }catch(_){}
+  S.variant = (q && VARIANTS.some(function(v){ return v[0]===q.toUpperCase(); })) ? q.toUpperCase()
+            : (saved && (saved === "A" || saved === "B")) ? saved : "A";
+
+  var proj = document.createElement("select"); proj.className="btn"; proj.id="proj";
+  PROJECTS.forEach(function(p){ var o=document.createElement("option"); o.value=p.id; o.textContent=p.name; proj.appendChild(o); });
+  proj.value = S.project;
+  proj.onchange = function(){ S.project=proj.value; S.detail=null; S.lastAction="切换项目 "+proj.value; render(); };
+
+  var ref = document.createElement("button"); ref.className="btn"; ref.id="refresh"; ref.textContent="↻"; ref.title="重新拉取";
+  ref.onclick = function(){ S.lastAction="刷新"; render(); toast("已刷新（原型，无真实请求）"); };
+
+  var holder = document.querySelector(".phead");
+  holder.innerHTML = '<span class="dot"></span><h1>Plane</h1><span class="grow"></span>';
+
+  // 视图切换（A 列式 / B 分组列表）：产品内的正式控件，选择记进宿主 storage（原型用 localStorage 代替）
+  var seg = document.createElement("div");
+  seg.className = "seg";
+  [["A","列"],["B","列表"]].forEach(function(v){
+    var b = document.createElement("button");
+    b.textContent = v[1]; b.dataset.view = v[0];
+    b.setAttribute("aria-pressed", String(S.variant === v[0]));
+    b.onclick = function(){ setVariant(v[0]); };
+    seg.appendChild(b);
+  });
+  holder.appendChild(seg);
+  holder.appendChild(proj); holder.appendChild(ref);
+  function paintSeg(){
+    seg.querySelectorAll("[data-view]").forEach(function(b){
+      b.setAttribute("aria-pressed", String(b.dataset.view === S.variant));
+    });
+  }
+  var _render = render;
+  render = function(){ _render(); paintSeg(); };
+
+  document.getElementById("err").onchange = function(e){
+    S.error = e.target.checked; S.lastAction = S.error? "模拟 NETWORK 失败":"恢复"; render();
+  };
+  document.getElementById("prev").onclick = function(){
+    var i = VARIANTS.findIndex(function(v){ return v[0]===S.variant; });
+    setVariant(VARIANTS[(i+VARIANTS.length-1)%VARIANTS.length][0]);
+  };
+  document.getElementById("next").onclick = function(){
+    var i = VARIANTS.findIndex(function(v){ return v[0]===S.variant; });
+    setVariant(VARIANTS[(i+1)%VARIANTS.length][0]);
+  };
+  document.getElementById("width").oninput = function(){
+    document.getElementById("panel").style.setProperty("--pw", this.value+"px");
+  };
+  document.addEventListener("keydown", function(e){
+    var tag = (e.target && e.target.tagName) || "";
+    if(/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+    if(e.key === "Escape" && S.startFor){ S.startFor=null; render(); return; }
+    if(e.key === "Escape" && S.conclFor){ S.conclFor=null; render(); return; }
+    if(e.key === "Escape" && S.detail){ closeDetail(); return; }
+    if(e.key === "ArrowLeft") document.getElementById("prev").click();
+    if(e.key === "ArrowRight") document.getElementById("next").click();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
