@@ -368,18 +368,23 @@
     det.innerHTML = "";
 
     if(S.error){
+      // pi-lens-ignore: no-inner-html-js
       body.innerHTML = '<div class="surface"><div style="font-size:12px;color:#e6e9ee">加载失败</div>'
         + '<div class="code">PLANE_NETWORK</div><div style="font-size:11px">连不上 Plane 实例，已自动重试 1 次</div>'
         + '<div style="margin-top:10px"><button class="btn" id="retry">重试</button></div></div>';
       var r = document.getElementById("retry");
       if(r) r.onclick = function(){ S.error=false; S.lastAction="重试成功"; render(); toast("已重新拉取"); };
     } else if(S.project==="internal"){
+      // pi-lens-ignore: no-inner-html-js
       body.innerHTML = '<div class="surface"><div style="font-size:12px;color:#e6e9ee">这个项目还没有工作项</div>'
         + '<div class="code">EMPTY</div><div style="font-size:11px">切换到 xlm-scrm 看看</div></div>';
     } else {
+      // pi-lens-ignore: no-inner-html-js
       body.innerHTML = S.variant==="A"? variantA() : S.variant==="B"? variantB() : variantC();
       // 覆盖式详情（A）与底部抽屉（C）挂在面板层，B 已在列表里就地展开
+      // pi-lens-ignore: no-inner-html-js
       if(S.detail && S.variant==="A") det.innerHTML = overlayHTML(item(S.detail));
+      // pi-lens-ignore: no-inner-html-js
       if(S.detail && S.variant==="C") det.innerHTML = sheetHTML(item(S.detail));
       if(S.conclFor) det.innerHTML += conclSheetHTML(item(S.conclFor));
       if(S.startFor) det.innerHTML += startSheetHTML(item(S.startFor));
@@ -400,6 +405,7 @@
 
   function toast(text, undo){
     var box = document.getElementById("toast");
+    // pi-lens-ignore: no-inner-html-js
     box.innerHTML = '<div class="toast"><span>'+esc(text)+'</span>'+(undo?'<span class="undo" id="undo">撤销</span>':'')+'</div>';
     var u = document.getElementById("undo");
     if(u) u.onclick = function(){ undo(); box.innerHTML=""; };

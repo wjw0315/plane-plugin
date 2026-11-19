@@ -11,18 +11,6 @@ import { boardHTML, listHTML, wireBoard, wireList } from "./board.js";
 const BUILD = "0.2.1+diag";
 const host = connectHost();
 
-/** 把 async 回调的异常接住并画到诊断区——沙箱 iframe 里未捕获错误只会显示「Script error.」，拿不到细节。 */
-function guard(fn, label) {
-  return async (...args) => {
-    try {
-      return await fn(...args);
-    } catch (e) {
-      const text = `[${label || "panel"}] ${e.code ? e.code + "：" : ""}${e.message || String(e)}${e.stack ? "\n" + String(e.stack).slice(0, 1500) : ""}`;
-      paintCrash(text);
-      throw e;
-    }
-  };
-}
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = "plane.project";
 const VIEW_KEY = "plane.view";
